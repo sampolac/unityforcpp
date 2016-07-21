@@ -15,12 +15,21 @@
     <ClCompile Include="..\Source\TestPlugin.cpp">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UnityArray.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Shared.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Source\UnityAdapter.h">
       <Filter>Source</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Shared.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UnityArray.h">
       <Filter>Source</Filter>
     </ClInclude>
   </ItemGroup>
