@@ -12,10 +12,10 @@ using UnityForCpp::UnityArray;
 namespace TestPlugin
 {
 	//We will change this int array from C++ and print the result from C#
-	static UnityArray<int>* nf_pIntUnityArray = NULL;
+	static UnityArray<int> nf_intUnityArray;
 
 	//We will change this float array from C# and print the result from C++
-	static UnityArray<float>* nf_pFloatUnityArray = NULL;
+	static UnityArray<float> nf_floatUnityArray;
 }
 
 //Short code for testing the currently available UnityForCpp Features
@@ -29,62 +29,61 @@ extern "C"
 		//TESTING FILE READING/WRITING FEATURES ----------------------------------
 
 		DEBUG_LOG("Requesting the FileTest.txt from C++");
-		UnityArray<uchar>* pFileContent = UnityAdapter::ReadFileContentToUnityArray("FileTest.txt");
-		ASSERT(pFileContent);
-	
-		DEBUG_LOG((const char*) pFileContent->GetArrayPtr());
+		UnityArray<uint8> fileContent; //No need to call Alloc, ReadFileContentToUnityArray allocates it
+		UnityAdapter::ReadFileContentToUnityArray("FileTest.txt", &fileContent);
+		ASSERT(fileContent.GetPtr());
+
+		DEBUG_LOG((const char*)fileContent.GetPtr());
 
 		DEBUG_LOG("Saving the file TestFolder1/TestFolder2/FileSavingTest.txt from C++");
 		UnityAdapter::SaveTextFile("TestFolder1/TestFolder2/FileSavingTest.txt", "This was saved to a file from an UnityPlugin");
 
 		DEBUG_LOG("Loading the saved file and printing its content");
-		UnityArray<uchar>* pSavedFileContent = UnityAdapter::ReadFileContentToUnityArray("TestFolder1/TestFolder2/FileSavingTest.txt");
-		ASSERT(pSavedFileContent);
+		UnityArray<uint8> savedFileContent; //No need to call Alloc, ReadFileContentToUnityArray allocates it
+		UnityAdapter::ReadFileContentToUnityArray("TestFolder1/TestFolder2/FileSavingTest.txt", &savedFileContent);
+		ASSERT(savedFileContent.GetPtr());
 
-		DEBUG_LOG((const char*)pSavedFileContent->GetArrayPtr());
+		DEBUG_LOG((const char*)savedFileContent.GetPtr());
 
 		DEBUG_LOG("Deleting the file FileSavingTest.txt from C++");
 		UnityAdapter::DeleteFile("TestFolder1/TestFolder2/FileSavingTest.txt");
 
 		//test the file was successfully deleted above
-		pSavedFileContent = UnityAdapter::ReadFileContentToUnityArray("TestFolder1/TestFolder2/FileSavingTest.txt");
-		ASSERT(pSavedFileContent == NULL);
+		savedFileContent.Release();
+		UnityAdapter::ReadFileContentToUnityArray("TestFolder1/TestFolder2/FileSavingTest.txt", &savedFileContent);
+		ASSERT(savedFileContent.GetPtr() == NULL);
 		DEBUG_LOG("We have successfully deleted the file FileSavingTest.txt!");
-
-		//release both file contents we have loaded
-		DELETE(pFileContent);
-		DELETE(pSavedFileContent);
 
 		//TESTING SHARED ARRAYS		
 		//Since the arrays are requested and released from a C++ code "decision", it is like C++ owns the arrays, so we
 		//initialize their values here, even for the float array that is mostly intended to be written from the C# code
 
 		DEBUG_LOG("Requesting shared arrays from C++ code");
-		TestPlugin::nf_pIntUnityArray = new UnityArray<int>(TEST_ARRAY_SIZE);
+		TestPlugin::nf_intUnityArray.Alloc(TEST_ARRAY_SIZE);
 		for (int i = 0; i < TEST_ARRAY_SIZE; ++i)
-			(*TestPlugin::nf_pIntUnityArray)[i] = 0;
+			TestPlugin::nf_intUnityArray[i] = 0;
 
-		TestPlugin::nf_pFloatUnityArray = new UnityArray<float>(TEST_ARRAY_SIZE);
+		TestPlugin::nf_floatUnityArray.Alloc(TEST_ARRAY_SIZE);
 		for (int i = 0; i < TEST_ARRAY_SIZE; ++i)
-			(*TestPlugin::nf_pFloatUnityArray)[i] = 0;
+			TestPlugin::nf_floatUnityArray[i] = 0;
 		
 		DEBUG_LOG("The shared arrays have been delivered and initialized with success");
 	}
 
 	int EXPORT_API T_GetSharedIntArrayId()
 	{
-		return TestPlugin::nf_pIntUnityArray->GetId();
+		return TestPlugin::nf_intUnityArray.GetId();
 	}
 
 	int EXPORT_API T_GetSharedFloatArrayId()
 	{
-		return TestPlugin::nf_pFloatUnityArray->GetId();
+		return TestPlugin::nf_floatUnityArray.GetId();
 	}
 
 	void EXPORT_API T_ChangeSharedIntArray()
 	{
 		for (int i = 0; i < TEST_ARRAY_SIZE; ++i)
-			(*TestPlugin::nf_pIntUnityArray)[i] += 1;
+			TestPlugin::nf_intUnityArray[i] += 1;
 	}
 
 	void EXPORT_API T_PrintSharedFloatArray()
@@ -94,14 +93,15 @@ extern "C"
 		outputStr[255] = 0; //make sure it will be zero terminated
 		snprintf(outputStr, 255, 
 			     "First 4 values of the float array being printed from C++: %.2f %.2f %.2f %.2f", 
-				 (*TestPlugin::nf_pFloatUnityArray)[0], (*TestPlugin::nf_pFloatUnityArray)[1], (*TestPlugin::nf_pFloatUnityArray)[2], (*TestPlugin::nf_pFloatUnityArray)[3]);
+				 TestPlugin::nf_floatUnityArray[0], TestPlugin::nf_floatUnityArray[1], 
+				 TestPlugin::nf_floatUnityArray[2], TestPlugin::nf_floatUnityArray[3]);
 
 		DEBUG_LOG(outputStr);
 	}
 
 	void EXPORT_API T_TerminateTest()
 	{
-		DELETE(TestPlugin::nf_pIntUnityArray);
-		DELETE(TestPlugin::nf_pFloatUnityArray);
+		TestPlugin::nf_intUnityArray.Release();
+		TestPlugin::nf_floatUnityArray.Release();
 	}
 } // end of export C block

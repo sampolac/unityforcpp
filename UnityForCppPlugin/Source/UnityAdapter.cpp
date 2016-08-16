@@ -3,7 +3,6 @@
 
 #include "UnityAdapter.h"
 #include "UnityArray.h"
-#include <assert.h>
 #include <stdio.h>
 
 namespace UnityForCpp
@@ -16,19 +15,19 @@ namespace Internals
 	struct DeliveredManagedArray
 	{
 		int id;
-		int count;
+		int length;
 		void* pArray;
 
 		DeliveredManagedArray()
-			: id(-1), count(0), pArray(NULL) {}
+			: id(-1), length(0), pArray(NULL) {}
 
-		DeliveredManagedArray(int _id, int _count, void* _pArray)
-			: id(_id), count(_count), pArray(_pArray) {}
+		DeliveredManagedArray(int _id, int _length, void* _pArray)
+			: id(_id), length(_length), pArray(_pArray) {}
 
 		//provides an way for UnityAdapter functions be able to receive arrays from C# and deliver them directly as UnityArray<>
-		template <typename T> UnityArray<T>* GetAsNewUnityArray()
+		template <typename T> UnityArray<T> GetAsNewUnityArray()
 		{
-			return new UnityArray<T>(id, count, pArray);
+			return UnityArray<T>(id, length, pArray);
 		}
 	};
 
@@ -79,24 +78,24 @@ namespace Internals
 		nf_ReleaseManagedArray = releaseManagedArrayFcPtr;
 	}
 
-	void DeliverRequestedManagedArray(int id, void* pArray, int count)
+	void DeliverRequestedManagedArray(int id, void* pArray, int length)
 	{
 		if (!pArray)
 			return;
 
-		DeliveredManagedArray deliveredArray(id, count, pArray);
+		DeliveredManagedArray deliveredArray(id, length, pArray);
 		GetDeliveredManagedArrayAndSetNext(&deliveredArray);
 	}
 
 } //Internals
 
 //check declaration for comments
-int NewManagedArray(const char* managedTypeName, int count, void** pOutputArrayPtr)
+int NewManagedArray(const char* managedTypeName, int length, void** pOutputArrayPtr)
 {
 	ASSERT(Internals::nf_RequestManagedArray);
 	ASSERT(pOutputArrayPtr);
 
-	Internals::nf_RequestManagedArray(managedTypeName, count);
+	Internals::nf_RequestManagedArray(managedTypeName, length);
 	struct Internals::DeliveredManagedArray deliveredArray = Internals::GetDeliveredManagedArrayAndSetNext(NULL);
 
 	ASSERT(deliveredArray.pArray != NULL);
@@ -108,21 +107,30 @@ int NewManagedArray(const char* managedTypeName, int count, void** pOutputArrayP
 //check declaration for comments
 void ReleaseManagedArray(int arrayId)
 {
-	ASSERT(Internals::nf_ReleaseManagedArray);
+	if (!Internals::nf_ReleaseManagedArray)
+	{
+		assert(false);
+		return;
+	}
+
 	Internals::nf_ReleaseManagedArray(arrayId);
 }
 
 //check declaration for comments
-UnityArray<uchar>* ReadFileContentToUnityArray(const char* fullFilePath)
+bool ReadFileContentToUnityArray(const char* fullFilePath, UnityArray<uint8>* pUnityArrayOutput)
 {
 	ASSERT(Internals::nf_RequestFileContent);
+	ASSERT(pUnityArrayOutput != NULL);
+
 	Internals::nf_RequestFileContent(fullFilePath);
 	struct Internals::DeliveredManagedArray deliveredArray = Internals::GetDeliveredManagedArrayAndSetNext(NULL);
 
 	if (deliveredArray.pArray == NULL)
-		return NULL;
+		return false;
 
-	return deliveredArray.GetAsNewUnityArray<uchar>();
+	(*pUnityArrayOutput) = deliveredArray.GetAsNewUnityArray<uint8>();
+
+	return true;
 }
 
 //check declaration for comments
@@ -140,23 +148,15 @@ void DeleteFile(const char* fullFilePath)
 }
 
 //check declaration for comments
-void OutputDebugStr(const char* strToLog)
+void OutputDebugStr(int logType, const char* strToLog)
 {
-	assert(Internals::nf_OutputDebugStr);
-	Internals::nf_OutputDebugStr(strToLog);
-}
-
-//check declaration for comments
-void OnAssertionFailed(const char* sourceFileName, int sourceLineNumber)
-{
-	if (Internals::nf_OutputDebugStr)
+	if (Internals::nf_OutputDebugStr == NULL)
 	{
-		char assertionMsg[128];
-		assertionMsg[127] = 0;
-		snprintf(assertionMsg, 127, "ASSERTION FAILED: file %s, line %d", sourceFileName, sourceLineNumber);
-		OutputDebugStr(assertionMsg);
+		assert(false);
+		return;
 	}
-	assert(false);
+
+	Internals::nf_OutputDebugStr(logType, strToLog);
 }
 
 } //UnityAdapter namespace

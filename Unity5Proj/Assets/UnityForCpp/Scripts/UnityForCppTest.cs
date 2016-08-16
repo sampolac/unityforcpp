@@ -20,7 +20,7 @@ public class UnityForCppTest : MonoBehaviour {
         //T_InitTest Performs first tests and request arrays we will access too from C#
         TestDLL.T_InitTest();
 
-        UnityAdapter unityAdapter = UnityAdapter.instance;
+        UnityAdapter unityAdapter = UnityAdapter.Instance;
         m_sharedIntArray = unityAdapter.GetSharedArray<int>(TestDLL.T_GetSharedIntArrayId());
         m_sharedFloatArray = unityAdapter.GetSharedArray<float>(TestDLL.T_GetSharedFloatArrayId());
 
