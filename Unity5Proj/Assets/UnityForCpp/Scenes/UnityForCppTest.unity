@@ -240,6 +240,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7b91a30aed2626a4081ca30fc0c8f81f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  testObjectPrefab: {fileID: 175970, guid: 40b5661b7770e844eb34bfb6704575c8, type: 2}
+  numberOfGameObjects: 100
+  randomUpdatesInterval: 0.032
 --- !u!4 &2082851784
 Transform:
   m_ObjectHideFlags: 0

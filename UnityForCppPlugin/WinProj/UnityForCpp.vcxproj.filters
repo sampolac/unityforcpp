@@ -21,6 +21,12 @@
     <ClCompile Include="..\Source\Shared.cpp">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Perforce\AGFactory\UnityForCpp\UnityForCppPlugin\Source\UnityMessager.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Perforce\AGFactory\UnityForCpp\UnityForCppPlugin\Source\UnityMessagerPlugin.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Source\UnityAdapter.h">
@@ -30,6 +36,12 @@
       <Filter>Source</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UnityArray.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\..\Perforce\AGFactory\UnityForCpp\UnityForCppPlugin\Source\UnityMessager.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\..\Perforce\AGFactory\UnityForCpp\UnityForCppPlugin\Source\UnityMessager.hpp">
       <Filter>Source</Filter>
     </ClInclude>
   </ItemGroup>
