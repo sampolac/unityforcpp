@@ -4,37 +4,79 @@
 #include "Shared.h"
 #include "UnityArray.h"
 #include "UnityAdapter.h"
-
+#include <string>
 
 namespace UnityForCpp
 {
+	//All the blittable types are supported by default (https://msdn.microsoft.com/en-us/library/75dwhxf7.aspx), 
+	//you may also use the macro UA_SUPPORTED_TYPE on your cpp file to support structs composed ONLY by blittable types
+	UA_SUPPORTED_TYPE(uint8, "System.Byte")
+	UA_SUPPORTED_TYPE(int8, "System.SByte")
+	UA_SUPPORTED_TYPE(int16, "System.Int16")
+	UA_SUPPORTED_TYPE(uint16, "System.UInt16")
+	UA_SUPPORTED_TYPE(int32, "System.Int32")
+	UA_SUPPORTED_TYPE(uint32, "System.UInt32")
+	UA_SUPPORTED_TYPE(int64, "System.Int64")
+	UA_SUPPORTED_TYPE(uint64, "System.UInt64")
+	UA_SUPPORTED_TYPE(float, "System.Single")
+	UA_SUPPORTED_TYPE(double, "System.Double")
 
-//Use this macro for supporting new array types (https://msdn.microsoft.com/en-us/library/ya5y69ds.aspx).
-//IMPORTANT: Be sure about type compatibility between C# and your required platforms. A type correspondency 
-//that works well on one platform may not work at other platform. 
-//For Visual C++ types correspondency check https://msdn.microsoft.com/en-us/library/0wf2yk2k.aspx
-#define UA_SUPPORTED_TYPE(cpp_type, cs_name) \
-	template<> const char* const UnityArray<cpp_type>::s_cppTypeName = #cpp_type; \
-	template<> const char* const UnityArray<cpp_type>::s_managedTypeName = #cs_name;
+	UnityArrayBase::UnityArrayBase()
+	: m_id(-1), m_length(0), m_pArray(NULL) {}
 
-	//Currently supported array types
-	UA_SUPPORTED_TYPE(uchar, System.Byte)
-	UA_SUPPORTED_TYPE(int, System.Int32)
-	UA_SUPPORTED_TYPE(uint, System.UInt32)
-	UA_SUPPORTED_TYPE(float, System.Single)
-
-	UnityArrayBase::UnityArrayBase(const char* managedTypeName, int count)
-		: m_count(count)
+	UnityArrayBase::UnityArrayBase(const UnityArrayBase& unityArray)
+		: m_id(-1), m_length(0), m_pArray(NULL)
 	{
-		m_id = UnityAdapter::NewManagedArray(managedTypeName, count, &m_pArray);
+		m_id = UnityAdapter::NewManagedArray(unityArray.GetManagedTypeName(), unityArray.GetLength(), &m_pArray);
+		m_length = m_length;
+
+		memcpy(m_pArray, unityArray.GetVoidPtr(), unityArray.GetLength()*unityArray.GetTypeSize());
 	}
 
-	UnityArrayBase::UnityArrayBase(int id, int count, void* pArray)
-		: m_id(id), m_count(count), m_pArray(pArray) {}
+	UnityArrayBase::UnityArrayBase(UnityArrayBase&& unityArray)
+		: m_id(unityArray.m_id), m_length(unityArray.m_length), m_pArray(unityArray.m_pArray)
+	{
+		unityArray.m_id = -1;
+		unityArray.m_length = 0;
+		unityArray.m_pArray = NULL;
+	}
+
+	UnityArrayBase::UnityArrayBase(int id, int length, void* pArray)
+		: m_id(id), m_length(length), m_pArray(pArray) {}
 
 	UnityArrayBase::~UnityArrayBase()
 	{
-		UnityAdapter::ReleaseManagedArray(GetId());
+		Release();
 	}
 
+	void UnityArrayBase::MoveAssignmentAux(UnityArrayBase& unityArray)
+	{
+		ASSERT(m_pArray == NULL);
+
+		m_id = unityArray.m_id;
+		m_length = unityArray.m_length;
+		m_pArray = unityArray.m_pArray;;
+
+		unityArray.m_id = -1;
+		unityArray.m_length = 0;
+		unityArray.m_pArray = NULL;
+	}
+
+	void UnityArrayBase::Alloc(int length)
+	{
+		ASSERT(m_pArray == NULL);
+		m_id = UnityAdapter::NewManagedArray(GetManagedTypeName(), length, &m_pArray);
+		m_length = length;
+	}
+
+	void UnityArrayBase::Release()
+	{
+		if (m_pArray == NULL)
+			return;
+		
+		UnityAdapter::ReleaseManagedArray(m_id);
+		m_id = -1;
+		m_length = 0;
+		m_pArray = NULL;
+	}
 }

@@ -34,8 +34,8 @@ extern "C"
 
 	//Function used by the C# code as the way to return the requested managed array by UAInternals::NewManagedArray 
 	//and also to deliver the file content requested via UAInternals::ReadFileContentToManagedArray
-	void EXPORT_API UA_DeliverManagedArray(int id, void* pArray, int size)
+	void EXPORT_API UA_DeliverManagedArray(int id, void* pArray, int length)
 	{
-		UAInternals::DeliverRequestedManagedArray(id, pArray, size);
+		UAInternals::DeliverRequestedManagedArray(id, pArray, length);
 	}
 } // end of export C block

@@ -13,7 +13,7 @@ using AOT;
 namespace UnityForCpp
 {
 
-//Singleton, meant to be component of an UnityForCpp object on the Unity Editor, which is not destroyed with the scene
+//Singleton. Meant to be component of an UnityForCpp object on the Unity Editor, which is not destroyed with the scene
 //Provides Unity/C# multiplatform features to its correspoding C++ class (UnityAdapter.h/.cpp)
 //For C# users it providers the shared memory arrays being used by C++
 //
@@ -24,19 +24,25 @@ namespace UnityForCpp
 public class UnityAdapter : MonoBehaviour
 {
     //SINGLETON access point 
-    public static UnityAdapter instance { get { return _s_instance; } }
+    public static UnityAdapter Instance { get { return _s_instance; } }
 
     //Get an existing shared array being used by the cpp code. The id should be given to you from your cpp application
     public T[] GetSharedArray<T>(int id)
     {
-        return s_sharedArrays[id].GetArrayAsObject() as T[];
+        return GetSharedArray(id) as T[];
+    }
+
+    //Same as GetSharedArray<>, but returning the "object" directly, with no casting
+    public object GetSharedArray(int id)
+    {
+        return _s_sharedArrays[id].GetArrayAsObject();
     }
 
     private static UnityAdapter _s_instance = null;
 
     //Usually fields have to be static since methods to be called from C++ must be static
-    private static Dictionary<int, SharedArrayHolder> s_sharedArrays = null;
-    private static int s_lastSharedArrayId = -1;
+    private static Dictionary<int, SharedArrayHolder> _s_sharedArrays = null;
+    private static int _s_lastSharedArrayId = -1;
 
     //WARNING: the C++ DLL state is not reset when the game is reset on the Unity Editor
     //So, ideally, DLL initialization functions should support redundant calls with no side effects 
@@ -45,7 +51,7 @@ public class UnityAdapter : MonoBehaviour
         if (_s_instance != null && _s_instance != this)
         {
             Destroy(this.gameObject);
-            throw new Exception("[UnityForCpp] More than one instance of UnityAdapter being used!!");
+            throw new Exception("[UnityAdapter] More than one instance of UnityAdapter being created!!");
         }
         else
         {
@@ -53,24 +59,35 @@ public class UnityAdapter : MonoBehaviour
             DontDestroyOnLoad(this.gameObject);
         }
 
-        if (s_sharedArrays == null)
-            s_sharedArrays = new Dictionary<int, SharedArrayHolder>();
+        if (_s_sharedArrays == null)
+            _s_sharedArrays = new Dictionary<int, SharedArrayHolder>();
 
-        Debug.Log("[UnityForCpp] UnityForCpp DLL is about to be loaded.");
+        Debug.Log("[UnityAdapter] UnityForCpp DLL is about to be loaded.");
 
         //Provide C# function pointers to cpp, making Unity features available from cpp code
         UnityAdapterDLL.UA_SetOutputDebugStrFcPtr(OutputDebugStr);
         UnityAdapterDLL.UA_SetFileFcPtrs(RequestFileContent, SaveTextFile);
         UnityAdapterDLL.UA_SetArrayFcPtrs(RequestManagedArray, ReleaseManagedArray);
 
-        Debug.Log("[UnityForCpp] UnityForCpp DLL was loaded and UnityAdapter was initialized at the C++ and C# sides.");
+        Debug.Log("[UnityAdapter] UnityForCpp DLL was loaded and UnityAdapter was initialized at the C++ and C# sides.");
     }
 
     //Provides Unity Debug.Log feature to the cpp code
     [MonoPInvokeCallback(typeof(UnityAdapterDLL.OutputDebugStrDelegate))]
-    static void OutputDebugStr(string str)
+    private static void OutputDebugStr(int logType, string str)
     {
-        Debug.Log("[From Cpp] " + str);
+        switch (logType)
+        {
+            case 0:
+                Debug.Log("[From Cpp] " + str);
+                break;
+            case 1:
+                Debug.LogWarning("[From Cpp] " + str);
+                break;
+            case 2:
+                Debug.LogError("[From Cpp] " + str);
+                break;
+        }
     }
 
     //Provides access to files managed by Unity to the c++ code
@@ -79,7 +96,7 @@ public class UnityAdapter : MonoBehaviour
     //Saved files will have the persistent data folder as path root 
     //Bundle files are expected to have an Assets "Resources" folder as path root
     [MonoPInvokeCallback(typeof(UnityAdapterDLL.RequestFileContentDelegate))]
-    static void RequestFileContent(string fullFilePath)
+    private static void RequestFileContent(string fullFilePath)
     {
         string finalFilePath = Application.persistentDataPath + "/" + fullFilePath;
         byte[] fileData = null;
@@ -103,13 +120,13 @@ public class UnityAdapter : MonoBehaviour
         {
             //if the file was found and loaded deliver it to cpp as a shared managed byte array
             //to be released by the C++ code after usage, in the same way other shared arrays are.
-            int arrayId = ++s_lastSharedArrayId;
+            int arrayId = ++_s_lastSharedArrayId;
             SharedArrayHolder sharedArrayHolder = new SharedArrayHolder(fileData);
-            s_sharedArrays.Add(arrayId, sharedArrayHolder);
+            _s_sharedArrays.Add(arrayId, sharedArrayHolder);
             UnityAdapterDLL.UA_DeliverManagedArray(arrayId, sharedArrayHolder.GetArrayPtr(), fileData.Length);
         }
         else //else we finish the function without delivering anything
-            Debug.Log("[UnityForCpp] Warning: Could NOT provide the file " + finalFilePath + ", requested from the C++ code");
+            Debug.Log("[UnityAdapter] Warning: Could NOT provide the file " + finalFilePath + ", requested from the C++ code");
     }
 
     //Provides the Unity multiplatform file saving feature to the C++ code
@@ -117,7 +134,7 @@ public class UnityAdapter : MonoBehaviour
     //The persistent data folder for the platform will be the path root. An existing file for this path will be overwriten.
     //Use "DELETE" as the "textContent" for just deleting the file for this path if it exists. 
     [MonoPInvokeCallback(typeof(UnityAdapterDLL.SaveTextFileDelegate))]
-    static void SaveTextFile(string fullFilePath, string textContent)
+    private static void SaveTextFile(string fullFilePath, string textContent)
     {
         fullFilePath = Application.persistentDataPath + "/" + fullFilePath;
         if (textContent.StartsWith("DELETE"))
@@ -138,54 +155,54 @@ public class UnityAdapter : MonoBehaviour
     //Be sure you can handle this type properly on C++ from the platforms you are working on
     //For Visual C++ (windows platform): https://msdn.microsoft.com/en-us/library/0wf2yk2k.aspx
     [MonoPInvokeCallback(typeof(UnityAdapterDLL.RequestManagedArrayDelegate))]
-    static void RequestManagedArray(string typeName, int arraySize)
+    private static void RequestManagedArray(string typeName, int arrayLength)
     {
         Type arrayType = Type.GetType(typeName);
-        Assert.IsTrue(arrayType != null, "[UnityForCpp] The C++ code has requested an array of an invalid type.");
+        Assert.IsTrue(arrayType != null, "[UnityAdapter] The C++ code has requested an array of an invalid type.");
 
-        SharedArrayHolder sharedArrayHolder = new SharedArrayHolder(Array.CreateInstance(arrayType, arraySize));
+        SharedArrayHolder sharedArrayHolder = new SharedArrayHolder(Array.CreateInstance(arrayType, arrayLength));
 
-        int arrayId = ++s_lastSharedArrayId;
-        UnityAdapterDLL.UA_DeliverManagedArray(arrayId, sharedArrayHolder.GetArrayPtr(), arraySize);
-        s_sharedArrays.Add(arrayId, sharedArrayHolder);
+        int arrayId = ++_s_lastSharedArrayId;
+        UnityAdapterDLL.UA_DeliverManagedArray(arrayId, sharedArrayHolder.GetArrayPtr(), arrayLength);
+        _s_sharedArrays.Add(arrayId, sharedArrayHolder);
     }
 
     //To be used from the C++ code. 
     //Release C# shared arrays requested via RequestManagedArray or via RequestFileContent
     [MonoPInvokeCallback(typeof(UnityAdapterDLL.ReleaseManagedArrayDelegate))]
-    static void ReleaseManagedArray(int arrayId)
+    private static void ReleaseManagedArray(int arrayId)
     {
-        SharedArrayHolder sharedArrayHolder = s_sharedArrays[arrayId];
+        SharedArrayHolder sharedArrayHolder = _s_sharedArrays[arrayId];
         sharedArrayHolder.Release();
-        s_sharedArrays.Remove(arrayId);
+        _s_sharedArrays.Remove(arrayId);
     }
 
     //Class to hold the arrays currently allocated and shared with the C++ code
     private class SharedArrayHolder
     {
-        private object m_arrayAsObject;
-        private GCHandle m_handle;
-
         public SharedArrayHolder(object array)
         {
-            m_arrayAsObject = array;
-            m_handle = GCHandle.Alloc(array, GCHandleType.Pinned);
+            _arrayAsObject = array;
+            _handle = GCHandle.Alloc(array, GCHandleType.Pinned);
         }
 
         public object GetArrayAsObject()
         {
-            return m_arrayAsObject;
+            return _arrayAsObject;
         }
 
         public IntPtr GetArrayPtr()
         {
-            return m_handle.AddrOfPinnedObject();
+            return _handle.AddrOfPinnedObject();
         }
 
         public void Release()
         {
-            m_handle.Free();
+            _handle.Free();
         }
+
+        private object _arrayAsObject;
+        private GCHandle _handle;
     }; // SharedArrayHolder class
 
 #if (UNITY_WEBGL || UNITY_IOS) && !(UNITY_EDITOR)
@@ -200,7 +217,7 @@ public class UnityAdapter : MonoBehaviour
         //Delegates corresponding to the function pointers defined at UnityAdapter.h
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        public delegate void OutputDebugStrDelegate(string str);
+        public delegate void OutputDebugStrDelegate(int logType, string str);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         public delegate void RequestFileContentDelegate(string fullFilePath);
@@ -209,7 +226,7 @@ public class UnityAdapter : MonoBehaviour
         public delegate void SaveTextFileDelegate(string fullFilePath, string textContent);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        public delegate void RequestManagedArrayDelegate(string typeName, int arraySize);
+        public delegate void RequestManagedArrayDelegate(string typeName, int arrayLength);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         public delegate void ReleaseManagedArrayDelegate(int arrayId);
@@ -226,7 +243,7 @@ public class UnityAdapter : MonoBehaviour
         public static extern void UA_SetArrayFcPtrs(RequestManagedArrayDelegate requestDlg, ReleaseManagedArrayDelegate releaseDlg);
 
         [DllImport(DLL_NAME)]
-        public static extern void UA_DeliverManagedArray(int id, System.IntPtr array, int size);
+        public static extern void UA_DeliverManagedArray(int id, System.IntPtr array, int length);
     }; //UnityAdapterDLL class
 
 } // UnityAdapter class

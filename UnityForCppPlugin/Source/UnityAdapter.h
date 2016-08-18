@@ -21,13 +21,12 @@ namespace UnityAdapter
 
 // File utilities ----------------------------------
 
-//Open the file as TextAsset and read its content to an unity array and returns it or returns NULL if not found.
-//YOU *OWN* THIS UnityArray OBJECT AND SHOULD DELETE IT WHEN YOU ARE DONE.
+//Open the file as TextAsset and read its content to an unity array. Returns true in case of success and false if
+//the file could not be found. DO NOT CALL "Alloc" on the output array, this is done by the method. 
 //fullFilePath may (and should) include the file extension.
-//pSizeOutput is optional, since a text file content should ends with 0, but it's better to provided and rely on it.
 //The search *goes first* for existing saved files and after for bundle files. Saved files will have the persistent
 //data folder as path root. Bundle files are expected to have an Assets "Resources" folder as path root.
-UnityArray<uchar>* ReadFileContentToUnityArray(const char* fullFilePath);
+bool ReadFileContentToUnityArray(const char* fullFilePath, UnityArray<uint8>* pUnityArrayOutput);
 
 //Save the contentStr data to the file at the specified path (creates file and directory if needed).
 //The persistent data folder for the platform will be the path root. An existing file for this path will be overwriten.
@@ -38,20 +37,23 @@ void DeleteFile(const char* fullFilePath);
 
 // Debug utilities ----------------------------------
 
-//Check comments for the DEBUG_LOG macro, use it instead
-void OutputDebugStr(const char* strToLog);
+//These defined int values are expected by UnityAdapter.OutputDebugStr at the C# code 
+#define UA_NORMAL_LOG 0
+#define UA_WARNING_LOG 1
+#define UA_ERROR_LOG 2
 
-//Check comments for the ASSERT macro, use it instead
-void OnAssertionFailed(const char* sourceFileName, int sourceLineNumber); //use macro instead
+//Check comments for the DEBUG_LOG, WARNING_LOG, ERROR_LOG macros, use them instead
+//logType == UA_NORMAL_LOG (uses Debug.Log), logType == UA_WARNING_LOG (uses Debug.LogWarning), logType == UA_ERROR_LOG (uses Debug.LogError)
+void OutputDebugStr(int logType, const char* strToLog);
 
 // Shared memory utilities -----------------
 
-//PREFER USING UnityArray<TYPE> INSTEAD
-//This method request a new shared/managed (C#) array, having the given "size" and type specified by its .NET type.
+//USES UnityArray<TYPE> INSTEAD. Only use this method directly if you have a very special reason.
+//This method request a new shared/managed (C#) array, having the given "length" and type specified by its .NET type.
 //Returns the arrayId for received array, which can be provided to the C# code as an way for this to use the array
-//For checking the possible array types, check the usage of the macro UA_SUPPORTED_TYPE on UnityArray.cpp
+//For checking the possible array types, check the usage of the macro UA_SUPPORTED_TYPE on UnityArray.h
 //This method should never fail, if it does a C assertion will be triggered.
-int NewManagedArray(const char* managedTypeName, int count, void** pOutputArrayPtr);
+int NewManagedArray(const char* managedTypeName, int length, void** pOutputArrayPtr);
 
 //Release the shared/managed C# array
 void ReleaseManagedArray(int arrayId);
@@ -66,10 +68,10 @@ namespace Internals
 	// ---------------------- Interface for C++/C# communication through the UnityAdapterPlugin -------------------
 
 	//At C# UnityForCpp.UnityAdapter.UnityAdapterDLL defines delegates for each one of these function pointer types
-	typedef void(*OutputDebugStrFcPtr)(const char *); //(string) -> string to pass to Debug.Log()
+	typedef void(*OutputDebugStrFcPtr)(int, const char *); //(logType, string) -> string to pass to Debug.Log()
 	typedef void(*RequestFileContentFcPtr)(const char *);//(fullFilePath) -> file content should be returned via SetFileContent
 	typedef void(*SaveTextFileFcPtr)(const char *, const char*); //(fullFilePath, contentAsStr) 
-	typedef void(*RequestManagedArrayFcPtr)(const char*, int); //(dotNETTypeName, arraySize)
+	typedef void(*RequestManagedArrayFcPtr)(const char*, int); //(dotNETTypeName, arrayLength)
 	typedef void(*ReleaseManagedArrayFcPtr)(int); //(arrayId)
 
 	//Check for comments at UnityAdapterPlugin.h
@@ -84,7 +86,7 @@ namespace Internals
 						ReleaseManagedArrayFcPtr releaseManagedArrayFcPtr);
 
 	//Check for comments at UnityAdapterPlugin.h
-	void DeliverRequestedManagedArray(int id, void* pArray, int size);
+	void DeliverRequestedManagedArray(int id, void* pArray, int length);
 
 } //Internals namespace
 

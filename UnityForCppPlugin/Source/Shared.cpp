@@ -6,13 +6,21 @@
 
 namespace Shared
 {
-	void OutputDebugStr(const char* str)
-	{
-		UnityForCpp::UnityAdapter::OutputDebugStr(str);
-	}
+char n_outputStrBuffer[OUTPUT_MESSAGE_MAX_STRING_SIZE] = {0};
 
-	void OnAssertionFailed(const char* sourceFileName, int sourceLineNumber)
-	{
-		UnityForCpp::UnityAdapter::OnAssertionFailed(__FILE__, __LINE__);
-	}
+void OutputDebugStr(const char* str)
+{
+	UnityForCpp::UnityAdapter::OutputDebugStr(UA_NORMAL_LOG, str);
+}
+
+void OutputWarningStr(const char* str)
+{
+	UnityForCpp::UnityAdapter::OutputDebugStr(UA_WARNING_LOG, str);
+}
+
+void OutputErrorStr(const char* str)
+{
+	UnityForCpp::UnityAdapter::OutputDebugStr(UA_ERROR_LOG, str);
+}
+
 }
