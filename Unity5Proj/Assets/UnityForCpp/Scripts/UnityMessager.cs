@@ -1,5 +1,5 @@
 ﻿//Copyright (c) 2016, Samuel Pollachini (Samuel Polacchini)
-//This project is licensed under the terms of the MIT license
+//The UnityForCpp project is licensed under the terms of the MIT license
 
 using UnityEngine;
 using UnityEngine.Assertions;
@@ -361,7 +361,7 @@ public class UnityMessager : MonoBehaviour
     private ControlQueue _controlQueue = null;
 
     private const int _controlQueueId = 0; //MUST BE 0, corresponds to UM_CONTROL_QUEUE_ID on C++
-    private const int _maxNOfMessageQueues = 16; //corresponds to UM_MAX_N_OF_MESSAGE_QUEUES on C++, check comments for this. 
+    private const int _maxNOfMessageQueues = 32; //corresponds to UM_MAX_N_OF_MESSAGE_QUEUES on C++, check comments for this. 
 
     private static UnityMessager _s_instance = null; //singleton reference holder
 

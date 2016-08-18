@@ -1,5 +1,5 @@
 //Copyright (c) 2016, Samuel Pollachini (Samuel Polacchini)
-//This project is licensed under the terms of the MIT license
+//The UnityForCpp project is licensed under the terms of the MIT license
 
 //THIS SOURCE FILE HAS THREE PARTS:
 //

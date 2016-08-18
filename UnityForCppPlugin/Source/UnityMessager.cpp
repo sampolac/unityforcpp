@@ -1,5 +1,5 @@
 //Copyright (c) 2016, Samuel Pollachini (Samuel Polacchini)
-//This project is licensed under the terms of the MIT license
+//The UnityForCpp project is licensed under the terms of the MIT license
 
 #include "UnityMessager.h"
 
@@ -7,10 +7,15 @@
 #define UM_MIN_ALLOWED_VALUE_FOR_RECEIVER_IDS 16
 #define UM_MIN_ALLOWED_VALUE_FOR_QUEUE_ARRAY_SIZE 512
 
+//the message base is defined by (receiverId, messagerId, numberOfParameters)
 #define UM_MESSAGE_BASE_LENGTH 3
 
+//this corresponds to UnityMessager._controlQueueId on C#
 #define UM_CONTROL_QUEUE_ID 0
 
+//This code is set by the C# code to the first position of the first array of the control queue in order to
+//set that all messages were delivered, in such way the control queue can be considered empty. 
+//UnityMessager.ControlQueue._emptyCode is the corresponding constant on the C# code.
 #define UM_EMPTY_CONTROL_QUEUE_CODE -123456
 
 namespace UnityForCpp
@@ -33,6 +38,9 @@ int UnityMessager::InstanceAndProvideAwakeInfo(int maxNOfReceiverIds, int maxQue
 	}
 	
 	ASSERT(s_pInstance == NULL);
+
+	//We make this assignment here since it is the logical place for it to be. However, we know the UnityMessager constructor
+	//will do this assignment itself because s_pInstance must be valid when the control queue is beign instanced. 
 	s_pInstance = new UnityMessager(maxNOfReceiverIds, maxQueueArraysSizeInBytes);
 
 	return s_pInstance->ProvideUnityMessagerAwakeInfo();
@@ -47,19 +55,28 @@ UnityMessager::UnityMessager(int maxNOfReceiverIds, int maxQueueArraysSizeInByte
 		&& maxQueueArraysSizeInBytes >= UM_MIN_ALLOWED_VALUE_FOR_QUEUE_ARRAY_SIZE);
 
 	m_maxQueueArraysSizeInBytes = maxQueueArraysSizeInBytes;
-	m_receiverIds.Alloc(maxNOfReceiverIds);
+	m_receiverIds.Alloc(maxNOfReceiverIds); //instances the shared array to control the receiver ids.
+
+	//The position 0 of the m_receiverIds shared array indicates the NEXT FREE receiver id, and at the position
+	//of this given id on the m_receiverIds shared array we set the next free id after that. So, it is a kind of 
+	//simple linked list of free receiver ids stablished by the m_receiverIds array. Check the comments for the 
+	//implementation of NewReceiverId() for more details about how the control of the free receiver ids is made. 
 	for (int i = 0; i < maxNOfReceiverIds; ++i)
-		m_receiverIds[i] = i + 1;
+		m_receiverIds[i] = i + 1; //"i+1" is the next free id after the initialization, indicated by the i position. 
 
-	m_receiverIds[maxNOfReceiverIds - 1] = 0;
+	m_receiverIds[maxNOfReceiverIds - 1] = 0; //0 means there is no other free id beyond this one.
 
+	//initialize the message queues array. Except for the ControlQueue the other message queues are ParamQueue<T> objects
+	//that get instanced only at the first time a parameter T is pushed to a message in a given game execution.
 	for (int i = 0; i < UM_MAX_N_OF_MESSAGE_QUEUES; ++i)
 		m_messageQueuesPtrs[i] = NULL;
 
-	s_pInstance = this; //We set this here before the suitable set where "new" is called because the queue instanciation bellow needs it
+	//We set this here because it is needed for the ControlQueue instance creation right bellow. 
+	s_pInstance = this; 
 
 	m_pControlQueue = new ControlQueue();
 	ASSERT(m_pControlQueue->GetQueueId() == UM_CONTROL_QUEUE_ID); //CONTROL QUEUE MUST BE THE QUEUE 0
+	
 	m_messageQueuesPtrs[UM_CONTROL_QUEUE_ID] = m_pControlQueue;
 	m_lastAssignedQueueId = UM_CONTROL_QUEUE_ID;
 }
@@ -83,16 +100,20 @@ UnityMessager::~UnityMessager()
 
 int UnityMessager::NewReceiverId()
 {
-	int nextFreeId = m_receiverIds[0];
-	m_receiverIds[0] = m_receiverIds[nextFreeId];
+	int nextFreeId = m_receiverIds[0]; //Position 0 holder the next free id
+
+	//The next free id holds the next free id after it, so bellow we are removing the next free id from the free ids single linked list
+	m_receiverIds[0] = m_receiverIds[nextFreeId]; 
+	// -1 means this id is use, not being free anymore. ONLY THE C# CODE CAN RELEASE IDs, so they get back to the single linked list.
 	m_receiverIds[nextFreeId] = -1;
 	
-	ASSERT(nextFreeId != 0);
+	ASSERT(nextFreeId != 0); //IF IT FAILS WE GOT OUT OF RECEIVER IDS, this must not happen!!!
 	return nextFreeId;
 }
 
 int UnityMessager::ProvideUnityMessagerAwakeInfo()
 {
+	//For now this is the only message we need to send to initialize the C# UnityMessager instace
 	int params[] = { m_receiverIds.GetId() };
 	m_pControlQueue->SendControlMessage(UMM_SET_RECEIVER_IDS_ARRAY, 1, params);
 
@@ -106,8 +127,10 @@ void UnityMessager::SendMessage(int receiverId, int msgId)
 
 void UnityMessager::OnStartMessageDelivering()
 {
+	//WARNING: Using SendControlMessage, when it is actually taken as a normal message by the UnityMessager receiver on C#.
 	m_pControlQueue->SendControlMessage(UMM_FINISH_DELIVERING_MESSAGES, 0, NULL);
 
+	//Reset all the queues, preparing them for the next usage which should happen only after all messages get delivered
 	for (int i = 0; i <= m_lastAssignedQueueId; ++i)
 		m_messageQueuesPtrs[i]->Reset();
 }
@@ -140,9 +163,11 @@ UnityMessager::ControlQueue::ControlQueue()
 void UnityMessager::ControlQueue::SendControlMessage(int msgId, int nOfParams, const int* intParams)
 {
 	int* controlQueueRef = AllocSpace(UM_MESSAGE_BASE_LENGTH + nOfParams);
-	controlQueueRef[0] = UMR_MESSAGER;
+	controlQueueRef[0] = UMR_MESSAGER; //(0)
 	controlQueueRef[1] = msgId;
-	controlQueueRef[2] = -nOfParams;
+	controlQueueRef[2] = -nOfParams; //THIS INDICATES PLUS receiverId == 0 (UMR_MESSAGER) INDICATES A CONTROL MESSAGE TO THE C# CODE!!
+	
+	//control messages only support int parameters, which are pushed directly to the control queue.
 	for (int i = 0; i < nOfParams; ++i)
 		controlQueueRef[3 + i] = intParams[i];
 }
@@ -154,6 +179,9 @@ inline bool UnityMessager::ControlQueue::IsThereAnyMessageToDeliver()
 
 void UnityMessager::ControlQueue::AdvanceToNextUnityArrayNode()
 {
+	//avoids an endless recursion since the control queue SendMessage call to advance itself must not result on another
+	//call for advancing itself again. The ControlQueue::AllocSpace method assures the current array of the control queue
+	//will always reserve space for sending the message the sets the next control queue array on C#. 
 	if (isAdvancingToNextNode)
 		return;
 
