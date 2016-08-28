@@ -27,13 +27,13 @@ int UnityMessager::InstanceAndProvideAwakeInfo(int maxNOfReceiverIds, int maxQue
 {
 	if (maxNOfReceiverIds < UM_MIN_ALLOWED_VALUE_FOR_RECEIVER_IDS)
 	{
-		WARNING_LOGP("UnityMessager min value for maxNOfReceiverIds is %d. This value will be forced.", UM_MIN_ALLOWED_VALUE_FOR_RECEIVER_IDS);
+		WARNING_LOGF("UnityMessager min value for maxNOfReceiverIds is %d. This value will be forced.", UM_MIN_ALLOWED_VALUE_FOR_RECEIVER_IDS);
 		maxNOfReceiverIds = UM_MIN_ALLOWED_VALUE_FOR_RECEIVER_IDS;
 	}
 
 	if (maxQueueArraysSizeInBytes < UM_MIN_ALLOWED_VALUE_FOR_QUEUE_ARRAY_SIZE)
 	{
-		WARNING_LOGP("UnityMessager min value for maxQueueArraysSizeInBytes is %d. This value will be forced.", UM_MIN_ALLOWED_VALUE_FOR_QUEUE_ARRAY_SIZE);
+		WARNING_LOGF("UnityMessager min value for maxQueueArraysSizeInBytes is %d. This value will be forced.", UM_MIN_ALLOWED_VALUE_FOR_QUEUE_ARRAY_SIZE);
 		maxQueueArraysSizeInBytes = UM_MIN_ALLOWED_VALUE_FOR_QUEUE_ARRAY_SIZE;
 	}
 	
@@ -47,7 +47,7 @@ int UnityMessager::InstanceAndProvideAwakeInfo(int maxNOfReceiverIds, int maxQue
 }
 
 UnityMessager::UnityMessager(int maxNOfReceiverIds, int maxQueueArraysSizeInBytes)
-	: m_receiverIds(), m_pControlQueue(NULL), 
+	: m_receiverIds(), m_lastAssignedComponentId(-1), m_pControlQueue(NULL),
 	m_maxQueueArraysSizeInBytes(UM_MIN_ALLOWED_VALUE_FOR_QUEUE_ARRAY_SIZE),
 	m_lastAssignedQueueId(-1)
 {
@@ -65,6 +65,9 @@ UnityMessager::UnityMessager(int maxNOfReceiverIds, int maxQueueArraysSizeInByte
 		m_receiverIds[i] = i + 1; //"i+1" is the next free id after the initialization, indicated by the i position. 
 
 	m_receiverIds[maxNOfReceiverIds - 1] = 0; //0 means there is no other free id beyond this one.
+
+	for (int i = 0; i < UM_MAX_N_OF_COMPONENTS; ++i)
+		m_staticComponentIdsToResetPtrs[i] = NULL;
 
 	//initialize the message queues array. Except for the ControlQueue the other message queues are ParamQueue<T> objects
 	//that get instanced only at the first time a parameter T is pushed to a message in a given game execution.
@@ -88,12 +91,13 @@ void UnityMessager::DeleteInstance()
 
 UnityMessager::~UnityMessager() 
 {
+	//reset component ids to -1, so next time they are used (happens on Unity Editor) the registering process is repeated
+	for (int i = 0; i <= m_lastAssignedComponentId; ++i)
+		*(m_staticComponentIdsToResetPtrs[i]) = -1;
+
 	m_pControlQueue = NULL; //we delete it bellow
-
-	for (int i = 0; i < UM_MAX_N_OF_MESSAGE_QUEUES; ++i)
+	for (int i = 0; i <= m_lastAssignedQueueId; ++i)
 		DELETE(m_messageQueuesPtrs[i]);
-
-	m_lastAssignedQueueId = -1;
 
 	s_pInstance = NULL;
 }
@@ -120,19 +124,24 @@ int UnityMessager::ProvideUnityMessagerAwakeInfo()
 	return m_pControlQueue->GetFirstArrayId();
 }
 
-void UnityMessager::SendMessage(int receiverId, int msgId)
-{
-	m_pControlQueue->SendMessage(receiverId, msgId);
-}
-
 void UnityMessager::OnStartMessageDelivering()
 {
-	//WARNING: Using SendControlMessage, when it is actually taken as a normal message by the UnityMessager receiver on C#.
-	m_pControlQueue->SendControlMessage(UMM_FINISH_DELIVERING_MESSAGES, 0, NULL);
+	m_pControlQueue->SendMessage(0, UMM_FINISH_DELIVERING_MESSAGES);
 
 	//Reset all the queues, preparing them for the next usage which should happen only after all messages get delivered
 	for (int i = 0; i <= m_lastAssignedQueueId; ++i)
 		m_messageQueuesPtrs[i]->Reset();
+}
+
+void UnityMessager::RegisterNewComponent(const char* componentTypeName, int* componentIdStaticPtr)
+{
+	*componentIdStaticPtr = ++m_lastAssignedComponentId;
+	ASSERT(m_lastAssignedComponentId < UM_MAX_N_OF_COMPONENTS);
+
+	SendMessage(0, UMM_REGISTER_NEW_COMPONENT, m_lastAssignedComponentId, componentTypeName);
+	
+	//store the static variable address to we can reset it when UnityMessager instance is destroyed
+	m_staticComponentIdsToResetPtrs[m_lastAssignedComponentId] = componentIdStaticPtr;
 }
 
 void UnityMessager::RegisterMessageQueue(int queueId, MessageQueueBase* pMsgQueue)
@@ -149,7 +158,12 @@ void UnityMessager::RegisterMessageQueue(int queueId, MessageQueueBase* pMsgQueu
 
 void UnityMessager::ReleasePossibleQueueArrays()
 {
-	ASSERT(!m_pControlQueue->IsThereAnyMessageToDeliver());
+	if (m_pControlQueue->IsThereAnyMessageToDeliver())
+	{
+		ASSERT(false);
+		return;
+	}
+
 	for (int i = 0; i <= m_lastAssignedQueueId; ++i)
 		m_messageQueuesPtrs[i]->ReleaseArraysExceptFirst();
 }
@@ -165,7 +179,7 @@ void UnityMessager::ControlQueue::SendControlMessage(int msgId, int nOfParams, c
 	int* controlQueueRef = AllocSpace(UM_MESSAGE_BASE_LENGTH + nOfParams);
 	controlQueueRef[0] = UMR_MESSAGER; //(0)
 	controlQueueRef[1] = msgId;
-	controlQueueRef[2] = -nOfParams; //THIS INDICATES PLUS receiverId == 0 (UMR_MESSAGER) INDICATES A CONTROL MESSAGE TO THE C# CODE!!
+	controlQueueRef[2] = -nOfParams; //THIS, PLUS receiverId == 0 (UMR_MESSAGER), INDICATES A CONTROL MESSAGE 
 	
 	//control messages only support int parameters, which are pushed directly to the control queue.
 	for (int i = 0; i < nOfParams; ++i)

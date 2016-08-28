@@ -64,28 +64,28 @@ void OutputErrorStr(const char* str);
 
 //Log str to Unity console using "Debug.Log"
 #define DEBUG_LOG(str) Shared::OutputDebugStr(str)
-#define DEBUG_LOGP(formatStr, ...) LOG_WITH_PARAM_HELPER(DEBUG_LOG, formatStr, __VA_ARGS__)
+#define DEBUG_LOGF(formatStr, ...) LOG_WITH_PARAM_HELPER(DEBUG_LOG, formatStr, __VA_ARGS__)
 
 //Log str to Unity console using "Debug.LogWarning"
 #define WARNING_LOG(str) Shared::OutputWarningStr(str)
-#define WARNING_LOGP(formatStr, ...) LOG_WITH_PARAM_HELPER(WARNING_LOG, formatStr, __VA_ARGS__)
+#define WARNING_LOGF(formatStr, ...) LOG_WITH_PARAM_HELPER(WARNING_LOG, formatStr, __VA_ARGS__)
 
 //Log str to Unity console using "Debug.LogError"
 #define ERROR_LOG(str) Shared::OutputErrorStr(str)
-#define ERROR_LOGP(formatStr, ...) LOG_WITH_PARAM_HELPER(ERROR_LOG, formatStr, __VA_ARGS__)
+#define ERROR_LOGF(formatStr, ...) LOG_WITH_PARAM_HELPER(ERROR_LOG, formatStr, __VA_ARGS__)
 
 //When exp is false, logs its source file name and line before triggering an usual C assertion 
-#define ASSERT(exp) if (!(exp)) { ERROR_LOGP("ASSERTION FAILED: file %s, line %d", __FILE__, __LINE__); assert(false); }
+#define ASSERT(exp) if (!(exp)) { ERROR_LOGF("ASSERTION FAILED: file %s, line %d", __FILE__, __LINE__); assert(false); }
 
 #else //release version
 #define DEBUG_LOG(str)
-#define DEBUG_LOGP(formatStr, ...)
+#define DEBUG_LOGF(formatStr, ...)
 
 #define WARNING_LOG(str)
-#define WARNING_LOGP(formatStr, ...)
+#define WARNING_LOGF(formatStr, ...)
 
 #define ERROR_LOG(str) 
-#define ERROR_LOGP(formatStr, ...) 
+#define ERROR_LOGF(formatStr, ...) 
 
 #define ASSERT(str)
 #endif

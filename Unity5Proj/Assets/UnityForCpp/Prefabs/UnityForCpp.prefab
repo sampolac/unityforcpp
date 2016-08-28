@@ -9,7 +9,7 @@ GameObject:
   m_Component:
   - 4: {fileID: 462640}
   - 114: {fileID: 11463090}
-  - 114: {fileID: 11477010}
+  - 114: {fileID: 11457202}
   m_Layer: 0
   m_Name: UnityForCpp
   m_TagString: Untagged
@@ -29,6 +29,19 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 0
+--- !u!114 &11457202
+MonoBehaviour:
+  m_ObjectHideFlags: 1
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 100100000}
+  m_GameObject: {fileID: 110834}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f95ed5b341790841ac69129a55e96c2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  maxNumberOfReceiverIds: 64
+  maxQueueArraysSizeInBytes: 1024
 --- !u!114 &11463090
 MonoBehaviour:
   m_ObjectHideFlags: 1
@@ -40,19 +53,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b00276075dcbe244caeb72bc31143565, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
---- !u!114 &11477010
-MonoBehaviour:
-  m_ObjectHideFlags: 1
-  m_PrefabParentObject: {fileID: 0}
-  m_PrefabInternal: {fileID: 100100000}
-  m_GameObject: {fileID: 110834}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6f95ed5b341790841ac69129a55e96c2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  maxNumberOfReceiverIds: 32
-  maxQueueArraysSizeInBytes: 1024
 --- !u!1001 &100100000
 Prefab:
   m_ObjectHideFlags: 1

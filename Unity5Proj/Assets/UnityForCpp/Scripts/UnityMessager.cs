@@ -8,7 +8,7 @@ using System.IO;
 using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using AOT;
+using System.Reflection;
 
 namespace UnityForCpp
 {
@@ -16,10 +16,10 @@ namespace UnityForCpp
 public class UnityMessager : MonoBehaviour
 {
     //Max number of simultaneous message receiver instances bound to the UnityMessager and so able to receive messages. Min value is 16.
-    public int maxNumberOfReceiverIds;
+    public int maxNumberOfReceiverIds = 16;
     
     //Max size in bytes of the memory blocks used by UnityMessager. Min value is 512, 1024 or 2048 are usually good values.
-    public int maxQueueArraysSizeInBytes;
+    public int maxQueueArraysSizeInBytes = 512;
 
     //SINGLETON access point 
     public static UnityMessager Instance { get { return _s_instance; } }
@@ -54,12 +54,14 @@ public class UnityMessager : MonoBehaviour
         }
 
         _receivers[receiverId] = null;
+        _receiverGameObjects[receiverId] = null;
 
         //reinserts the id to the front of the single linked list, remembering the position 0 is always the head of the list.
         _receiverIdsSharedArray[receiverId] = _receiverIdsSharedArray[0];
         _receiverIdsSharedArray[0] = receiverId;
     }
 
+    //Set a C# object as receiver (it may be any C# object, including a game object component if you want make it special, beyond the default)
     public void SetReceiverObject(int receiverId, IMessageReceiver receiver)
     {
         //Check this id was really delivered to you via NewReceiverId(), which may be called from C# or from C++
@@ -70,6 +72,22 @@ public class UnityMessager : MonoBehaviour
         }
 
         _receivers[receiverId] = receiver;
+    }
+
+    //Set a game object as receiver and (optionally) specify the default receiver component
+    //the default receiver component is the target for when SendMessage is used from C++ without any component specified
+    public void SetReceiverObject(int receiverId, GameObject gameObject, IMessageReceiver defaultReceiverComponent = null)
+    {
+        //Check this id was really delivered to you via NewReceiverId(), which may be called from C# or from C++
+        if (_receiverIdsSharedArray[receiverId] != -1)
+        {
+            Debug.LogError("[UnityMessager] Attempt to set an object to a 'free' Receiver id!. Use NewReceiverId for requesting an id before setting an object to it.");
+            return;
+        }
+
+        _receiverGameObjects[receiverId] = gameObject;
+        _receivers[receiverId] = defaultReceiverComponent != null? defaultReceiverComponent
+                                        : gameObject.GetComponent(typeof(IMessageReceiver)) as IMessageReceiver;
     }
 
     //If true you usually should call DeliverMessagers right way. 
@@ -88,32 +106,80 @@ public class UnityMessager : MonoBehaviour
         //This sets an end message so the delivering process doesn't continue forever and reset things on C++ side
         UnityMessagerDLL.UM_OnStartMessageDelivering();
 
-        while (_controlQueue.HasMessagesToBeDelivered)
+        try
         {
-            //_currentUniqueId purpose is only to make sure there was no forbidden calls to Message::FillUnityMessagerInternalMessageInstance
-            Assert.IsTrue(++_currentUniqueId > 0); //always true, inside an assert just to be removed on release builds
-
-            //The call bellow will read the next message to our internal instance (_internalMessageInstance), so it can be sent to receivers
-            _controlQueue.ReadNextMessageToUnityMessagerInternalInstance();
-
-            IMessageReceiver receiver = _receivers[_internalMessageInstance.ReceiverId];
-            if (receiver != null)
-                receiver.ReceiveMessage(ref _internalMessageInstance);
-            else
-                Debug.LogError("[UnityMessager] Message sent to an invalid receiver!!");
-
-            //If the message receiver has not read all the parameters we need to advance manually until getting to the start of the next message
-            while (_controlQueue.NumberOfParamsBeforeNextMessage > 0)
+            while (_controlQueue.HasMessagesToBeDelivered)
             {
-                ParamInfo paramInfo = _controlQueue.CurrentParamInfo;
-                _messageQueues[paramInfo.QueueId].AdvanceToPos(paramInfo.ArrayLength >= 0? paramInfo.ArrayLength : 1);
-                _controlQueue.AdvanceToNextParam();
+                //_currentUniqueId purpose is only to make sure there was no forbidden calls to Message::FillUnityMessagerInternalMessageInstance
+                Assert.IsTrue(++_currentUniqueId > 0); //always true, inside an assert just to be removed on release builds
+
+                //The call bellow will read the next message to our internal instance (_internalMessageInstance), so it can be sent to receivers
+                _controlQueue.ReadNextMessageToUnityMessagerInternalInstance();
+
+                if (_internalMessageInstance.ComponentId >= 0) //is this message addressed to an specific game object component?
+                {
+                    GameObject receiverGameObject = null;
+                    if (_internalMessageInstance.ReceiverId >= 0) //was the receiver specified by an id?
+                        receiverGameObject = _receiverGameObjects[_internalMessageInstance.ReceiverId];
+                    else
+                    {   //else we have a name to look for with GameObject.Find
+                        int objectNameLength = -_internalMessageInstance.ReceiverId;
+                        string objectName = GetParamQueue<Byte>().ReadNextAsString(objectNameLength);
+                        receiverGameObject = GameObject.Find(objectName);
+                    }
+
+                    if (receiverGameObject != null) //if we have found the receiver game object
+                    {   
+                        //Get the component based on its type, indexed by the component id
+                        Component component = receiverGameObject.GetComponent(_componentTypes[_internalMessageInstance.ComponentId]);
+                        if (component != null)
+                        {
+                            if (_internalMessageInstance.MessageId >= 0) //if this is a message to an IMessageReceiver component
+                            {
+                                IMessageReceiver receiverComponent = component as IMessageReceiver;
+                                if (receiverComponent != null)
+                                    receiverComponent.ReceiveMessage(ref _internalMessageInstance);
+                                else
+                                    Debug.LogError("[UnityMessager] Message sent to an invalid receiver component!");
+                            }
+                            else //else this message will be delivered via reflection
+                                DeliverMessageWithReflection(component, ref _internalMessageInstance);
+                        }
+                        else
+                            Debug.LogError("[UnityMessager] Message sent to an component the receiver game object doesn't have!!");
+                    }
+                    else
+                        Debug.LogError("[UnityMessager] Message sent to an invalid or not found GameObject!!");
+                }
+                else //the message is addressed to a C# object (which may also be the default receiver component of game object receiver).
+                {
+                    IMessageReceiver receiver = _receivers[_internalMessageInstance.ReceiverId];
+                    if (receiver != null)
+                        receiver.ReceiveMessage(ref _internalMessageInstance);
+                    else
+                        Debug.LogError("[UnityMessager] Message sent to an invalid receiver object!!");
+                }
+
+                //If the message receiver has not read all the parameters we need to advance manually until getting to the start of the next message
+                while (_controlQueue.NumberOfParamsBeforeNextMessage > 0)
+                {
+                    ParamInfo paramInfo = _controlQueue.CurrentParamInfo;
+                    _messageQueues[paramInfo.QueueId].AdvanceToPos(paramInfo.ArrayLength >= 0 ? paramInfo.ArrayLength : 1);
+                    _controlQueue.AdvanceToNextParam();
+                }
             }
         }
-
-        //Reset Message Queues so they get ready for next usage when delivering messages again.
-        for (int i = 0; i < _messageQueues.Length; ++i)
-            _messageQueues[i].Reset();
+        catch (Exception exception)
+        {
+            _controlQueue.OnFinishDeliveringMessages();
+            throw exception;
+        }
+        finally
+        {
+            //Reset Message Queues so they get ready for next usage when delivering messages again.
+            for (int i = 0; i < _messageQueues.Length; ++i)
+                _messageQueues[i].Reset();
+        }
     }
 
     //This method will release almost all the shared arrays (used blocks of memory having around "maxQueueArraysSizeInBytes" bytes each)
@@ -135,7 +201,10 @@ public class UnityMessager : MonoBehaviour
     public struct Message
     {
         //The receiver associated with the receiving instance handling this message, usually you won't need it
-        public int ReceiverId { get; private set; } 
+        public int ReceiverId { get; private set; }
+
+        //The component Id for the component this message is addressed, usually you won't need it
+        public int ComponentId { get; private set; } 
         
         //Message Id is a value totally under your control, decide yourself the ids to represent your message types for a given
         //receiver type and use it on your ReceiveMessage method route the received message to the destination handler code.
@@ -199,22 +268,47 @@ public class UnityMessager : MonoBehaviour
         //Reads the next parameter as a single value and advance to the next parameter if any. 
         public T ReadNextParamAndAdvance<T>()
         {
-            StartReadingNextParamAndGetLength<T>(false);
-            return ParamQueue<T>.Instance.ReadNext();
+            Assert.IsTrue(CheckParamRequest(typeof(T), false)); //When assertions get compiled relevant additional checks are made          
+
+            T param = UnityMessager.Instance.GetParamQueue<T>(_paramInfo.QueueId).ReadNext();
+            Advance();
+            return param;
         }
 
-        //Reads the next parameter as an ArrayParam and advance to the next parameter if any. Check the ArrayParam class for more details.
+        //Reads the next parameter as an ArrayParam/T[] and advance to the next parameter if any. 
+        //ArrayParam can be implicitly converted to T[], however by using it directly you may avoid the creation of a new array object,
+        //accessing the values directly from the parameter queue. Check the ArrayParam class for more details.
         public ArrayParam<T> ReadNextParamAsArrayAndAdvance<T>()
         {
-            int length = StartReadingNextParamAndGetLength<T>(true);
-            return ParamQueue<T>.Instance.ReadNextAsArray(length);
+            Assert.IsTrue(CheckParamRequest(typeof(T), true)); //When assertions get compiled relevant additional checks are made          
+
+            ArrayParam<T> param = UnityMessager.Instance.GetParamQueue<T>(_paramInfo.QueueId).ReadNextAsArray(_paramInfo.ArrayLength);
+            Advance();
+            return param;
         }
-        
+
         //Reads the next parameter as an string and advance to the next parameter if any.
         public string ReadNextParamAsStringAndAdvance()
         {
-            int length = StartReadingNextParamAndGetLength<Byte>(true);
-            return ParamQueue<Byte>.Instance.ReadNextAsString(length);
+            Assert.IsTrue(CheckParamRequest(typeof(Byte), true)); //When assertions get compiled relevant additional checks are made          
+
+            string param = UnityMessager.Instance.GetParamQueue<Byte>(_paramInfo.QueueId).ReadNextAsString(_paramInfo.ArrayLength);
+            Advance();
+            return param;
+        }
+
+        //Reads the next parameter (single or array) as an object and advance to the next parameter if any. 
+        //if it is an array, the object will be a c# native array of the current parameter type (T[])
+        public object ReadNextParamAndAdvance()
+        {
+            bool isArray = IsNextParamAnArray;
+            Assert.IsTrue(CheckParamRequest(null, isArray)); //When assertions get compiled relevant additional checks are made          
+
+            object param = isArray ?
+                            UnityMessager.Instance._messageQueues[_paramInfo.QueueId].ReadNextAsArrayBase(_paramInfo.ArrayLength)
+                            : UnityMessager.Instance._messageQueues[_paramInfo.QueueId].ReadNextAsObject();
+            Advance();
+            return param;
         }
 
         //Skip the next parameter and advance to the next parameter after that if any.
@@ -226,7 +320,7 @@ public class UnityMessager : MonoBehaviour
 
         //FOR INTERNAL USAGE ONLY!! This method fills the data from the next message to be handled directly into
         //the internal Message instance of the UnityMessager, avoiding the need of exposing a public constructor or factory method
-        public static void FillUnityMessagerInternalMessageInstance(int rcvId, int msgId, int nOfParams) 
+        public static void FillUnityMessagerInternalMessageInstance(int rcvId, int rtnId, int msgId, int nOfParams) 
         {
             UnityMessager unityMessager = UnityMessager.Instance;
             
@@ -235,6 +329,7 @@ public class UnityMessager : MonoBehaviour
                           "[UnityMessager] NOT ALLOWED CALL TO FillUnityMessagerInternalMessageInstance, RESTART THE GAME!!");
 
             unityMessager._internalMessageInstance.ReceiverId = rcvId;
+            unityMessager._internalMessageInstance.ComponentId = rtnId;
             unityMessager._internalMessageInstance.MessageId = msgId;
             unityMessager._internalMessageInstance.NumberOfParams = nOfParams;
 
@@ -245,30 +340,13 @@ public class UnityMessager : MonoBehaviour
             unityMessager._internalMessageInstance._paramInfo = UnityMessager.Instance._controlQueue.CurrentParamInfo;
         }
 
-        //helper method for common operations when reading the next parameter of this message. It returns the length to be 
-        //read from the specific parameter queue for this type if an array was requested or -1 if it is a single value.
-        private int StartReadingNextParamAndGetLength<T>(bool isReadingAsArray)
+        //Advance to the next parameter (actually the one that comes after the one said as "next" on method titles
+        private void Advance()
         {
-            Assert.IsTrue(CheckParamRequest(typeof(T), isReadingAsArray)); //When assertions get compiled relevant additional checks are made          
-
-            //If this is the first time we are reading a parameter of the type T we need to create the ParamQueue for it.
-            if (ParamQueue<T>.Instance == null)
-            {
-                //We do that using the existing instance to MessageQueueBase for the respective queueId.
-                //This base class instance has held for us the ids provided in the past for this queueId. 
-                ParamQueue<T>.CreateInstance(UnityMessager.Instance._messageQueues[_paramInfo.QueueId]);
-                //Saves the new ParamQueue instance replacing the base class instance we don't need anymore
-                UnityMessager.Instance._messageQueues[_paramInfo.QueueId] = ParamQueue<T>.Instance;
-            }
-
-            int length = _paramInfo.ArrayLength; //saving length before the code bellow overwrites it.
-
             //Now we are advancing to the parameter the comes after the one we calling "Next Parameter" by this method name.
             UnityMessager.Instance._controlQueue.AdvanceToNextParam();
             //so now we have it ready to the next request of -1 set to the _paramInfo.QueueId if there is no other params for this message
             _paramInfo = UnityMessager.Instance._controlQueue.CurrentParamInfo;
-            
-            return length;
         }
 
         //Perform additional checks to log errors to the user when parameters are being requested in a wrong way for this message instance
@@ -286,7 +364,7 @@ public class UnityMessager : MonoBehaviour
                 return false;
             }
 
-            if (UnityMessager.Instance._messageQueues[_paramInfo.QueueId].QueueType != requestedType)
+            if (requestedType != null && UnityMessager.Instance._messageQueues[_paramInfo.QueueId].QueueType != requestedType)
             {
                 Debug.LogError("[UnityMessager] Parameter of wrong type being requested!");
                 return false;
@@ -328,8 +406,16 @@ public class UnityMessager : MonoBehaviour
 
         public void CopyTo(T[] destArray, int destStartIdx, int thisStartIdx, int copyLength)
         {
-            Assert.IsTrue(thisStartIdx >= 0 && (thisStartIdx + copyLength) < Length);
+            Assert.IsTrue(thisStartIdx >= 0 && (thisStartIdx + copyLength) <= Length);
             Array.Copy(_array, _firstIdx + thisStartIdx, destArray, destStartIdx, copyLength);
+        }
+
+        //better to avoid this implicit conversion on performance sensitive code.
+        public static implicit operator T[](ArrayParam<T> array)
+        {
+            T[] result = new T[array.Length];
+            array.CopyTo(result, 0, 0, array.Length);
+            return result;
         }
 
         public ArrayParam(T[] array, int firstIdx, int length)
@@ -353,8 +439,14 @@ public class UnityMessager : MonoBehaviour
     //shared array for controling the available receiver ids, keep them in synch between the C++ code and the C# code.
     private int[] _receiverIdsSharedArray = null;
 
-    //message receiver instances accordingly to their receiverIds. 
+    //message receiver instances (OR default component instances) accordingly to their receiverIds. 
     private IMessageReceiver[] _receivers = null;
+
+    //message receiver game object instances accordingly to their receiverIds
+    private GameObject[] _receiverGameObjects = null;
+
+    //component types, this is indexed by the unique internal component id for the component type
+    private List<Type> _componentTypes = null;
 
     //Message queues arrays, where the 0 position is the control queue and the next ones are the ParamQueue instances, one per param type
     private MessageQueueBase[] _messageQueues = null;
@@ -411,7 +503,11 @@ public class UnityMessager : MonoBehaviour
 
         _receivers = new IMessageReceiver[maxNumberOfReceiverIds];
         //Internal MessageReceiver class, handle messages sent to the UnityMessager itself. The receiver Id 0 is known as being its receiver id by default.
-        _receivers[0] = new MessageReceiver(); 
+        _receivers[0] = new MessageReceiver();
+
+        _receiverGameObjects = new GameObject[maxNumberOfReceiverIds];
+
+        _componentTypes = new List<Type>();
 
         DeliverMessages(); //Deliver the first messages, expected to be only control messages to finish with the intialization process
     }
@@ -420,6 +516,70 @@ public class UnityMessager : MonoBehaviour
     {
         //This will delete the singleton instance on C++ and release all the shared arrays allocated by the UnityMessager
         UnityMessagerDLL.UM_OnDestroy();
+    }
+
+    //Registers a new component type being used by the C++ code as receiver component for game object receivers
+    private void RegisterComponentType(int id, string typeName)
+    {
+        Assert.IsTrue(_componentTypes.Count == id);//the id is the index, it would be strange if this assertion fails
+
+        Type componentType = Type.GetType(typeName);
+        Assert.IsTrue(componentType != null, "[UnityMessager] Invalid component type being used from C++");
+
+        _componentTypes.Add(componentType);
+    }
+
+    //helper method for getting the Parameter Queue created at the first time its accessed for an specific type
+    private ParamQueue<T> GetParamQueue<T>(int queueId = -1) 
+    {
+        //If this is the first time we are reading a parameter of the type T we need to create the ParamQueue for it.
+        if (ParamQueue<T>.Instance == null)
+        {
+            if (queueId < 0)
+            {
+                for (queueId = 0; queueId < _maxNOfMessageQueues; ++queueId)
+                {
+                    if (_messageQueues[queueId].QueueType == typeof(T))
+                        break;
+                }
+
+                if (queueId == _maxNOfMessageQueues)
+                    return null;
+            }
+            //We do that using the existing instance to MessageQueueBase for the respective queueId.
+            //This base class instance has held for us the ids provided in the past for this queueId. 
+            ParamQueue<T>.CreateInstance(UnityMessager.Instance._messageQueues[queueId]);
+            //Saves the new ParamQueue instance replacing the base class instance we don't need anymore
+            _messageQueues[queueId] = ParamQueue<T>.Instance;
+        }
+
+        return ParamQueue<T>.Instance;
+    }
+
+    //helper method to get a message based on reflection delivered with the message parameters extracted
+    private void DeliverMessageWithReflection(object component, ref Message message)
+    {
+        int methodNameLength = -message.MessageId; //messageId, when negative, is the length of the method name string
+        string methodName = GetParamQueue<Byte>().ReadNextAsString(methodNameLength);
+
+        MethodInfo methodInfo = component.GetType().GetMethod(methodName);
+
+        ParameterInfo[] paramInfos = methodInfo.GetParameters();
+
+        Assert.IsTrue(message.NumberOfParams == paramInfos.Length);
+        object[] parameters = null;
+
+        if (paramInfos.Length > 0) //is there any parameter to read
+        {
+            parameters = new object[paramInfos.Length];
+            int i = -1;
+            while (message.NumberOfParamsToBeRead > 0)
+                parameters[++i] = paramInfos[i].ParameterType == typeof(string) ? //read a string as a string, so we don't get a byte array
+                                  message.ReadNextParamAsStringAndAdvance()
+                                  : message.ReadNextParamAndAdvance();
+        }
+
+        methodInfo.Invoke(component, parameters);
     }
 
     //Control messages are specific to setup or control the message delivering process itself  
@@ -472,6 +632,10 @@ public class UnityMessager : MonoBehaviour
                 case 3: //UMM_FINISH_DELIVERING_MESSAGES = 3, Send to mark the last message to be delivered (THIS ONE). 
                     UnityMessager.Instance._controlQueue.OnFinishDeliveringMessages();
                     break;
+                case 4: //UMM_REGISTER_NEW_COMPONENT = 4
+                    UnityMessager.Instance.RegisterComponentType(msg.ReadNextParamAndAdvance<int>(), 
+                                                                 msg.ReadNextParamAsStringAndAdvance());
+                    break;
                 default:
                     Debug.LogError("[UnityMessager] Unknow message id received by UnityMessager.ReceiveMessage!");
                     break;
@@ -506,10 +670,6 @@ public class UnityMessager : MonoBehaviour
         //Usual contructor
         public MessageQueueBase(int queueId)
         {
-            _firstArrayId = -1;
-            _currentArrayId = -1;
-            _currentArrayPos = 0;
-            
             QueueId = queueId;
             QueueType = null;
         }
@@ -520,31 +680,30 @@ public class UnityMessager : MonoBehaviour
             QueueId = instanceToCopy.QueueId;
             QueueType = instanceToCopy.QueueType;
 
-            _firstArrayId = instanceToCopy._firstArrayId;
-            _currentArrayId = instanceToCopy._currentArrayId;
+            _firstArrayBase = instanceToCopy._firstArrayBase;
+            _currentArrayBase = instanceToCopy._currentArrayBase;
             _currentArrayPos = instanceToCopy._currentArrayPos;
         }
 
         //Sets the id of the first array for this queue. Having this info we can reset the queue to its first id after delivering all the messages
         public void SetFirstArray(int arrayId) 
         {
-            _firstArrayId = arrayId;
-            _currentArrayId = arrayId;
-
-            QueueType = UnityAdapter.Instance.GetSharedArray(arrayId).GetType().GetElementType();
+            _firstArrayBase = UnityAdapter.Instance.GetSharedArray(arrayId);
+            _currentArrayBase = _firstArrayBase;
+            QueueType = _firstArrayBase.GetType().GetElementType();
         }
 
         //Just updates the current array id on this base class method. Derived classes should update their array references also.
         public virtual void SetCurrentArray(int arrayId) 
         {
-            _currentArrayId = arrayId;
+            _currentArrayBase = UnityAdapter.Instance.GetSharedArray(arrayId);
             _currentArrayPos = 0;
         }
 
         //Resets the Message queue so it starts from its beginning at the next Message delivering process
         public virtual void Reset()
         {
-            _currentArrayId = _firstArrayId;
+            _currentArrayBase = _firstArrayBase;
             _currentArrayPos = 0;
         }
 
@@ -555,9 +714,25 @@ public class UnityMessager : MonoBehaviour
             _currentArrayPos += nOfItemsToSkip;
         }
 
-        protected int _currentArrayPos;
-        protected int _firstArrayId;
-        protected int _currentArrayId;
+        //Read the next value on the queue as a single param value
+        public object ReadNextAsObject()
+        {
+            return _currentArrayBase.GetValue(_currentArrayPos++);
+        }
+
+        //Read the next value on the queue as an array value
+        public Array ReadNextAsArrayBase(int length)
+        {
+            var array = Array.CreateInstance(QueueType, length);
+            Array.Copy(_currentArrayBase, _currentArrayPos, array, 0, length);
+            _currentArrayPos += length;
+
+            return array;
+        }
+
+        protected int _currentArrayPos = 0;
+        protected Array _firstArrayBase = null;
+        protected Array _currentArrayBase = null;
     }
 
     private abstract class MessageQueue<T>: MessageQueueBase
@@ -566,23 +741,22 @@ public class UnityMessager : MonoBehaviour
             : base(queueId)
         {
             SetFirstArray(firstArrayId);
-            _firstArray = _currentArray = UnityAdapter.Instance.GetSharedArray<T>(firstArrayId);
+            _firstArray = _currentArray = _firstArrayBase as T[];
         }
 
         //complements the base class version by actually keeping references to the first and current queue arrays 
         public MessageQueue(MessageQueueBase baseInst)
             : base(baseInst)
         {
-            _firstArray = UnityAdapter.Instance.GetSharedArray<T>(_firstArrayId);
-            _currentArray = _firstArrayId == _currentArrayId ? _firstArray
-                                                              : UnityAdapter.Instance.GetSharedArray<T>(_currentArrayId);
+            _firstArray = _firstArrayBase as T[];
+            _currentArray = _firstArrayBase == _currentArrayBase ? _firstArray : _currentArrayBase as T[];
         }
 
         //complements the base class version by actually updating the current array reference 
         public override void SetCurrentArray(int arrayId)
         {
             base.SetCurrentArray(arrayId);
-            _currentArray = UnityAdapter.Instance.GetSharedArray<T>(arrayId);
+            _currentArray = _currentArrayBase as T[];
         }
 
         //complements the base class version by actually updating the current array reference 
@@ -610,20 +784,30 @@ public class UnityMessager : MonoBehaviour
 
         //This advances the control queue over the next message, creating the Message instance to be handled and preparing for 
         //reading the parameters (actually the first parameter info is already read here by default).
-        public void ReadNextMessageToUnityMessagerInternalInstance()
-        {
+        public void ReadNextMessageToUnityMessagerInternalInstance() 
+        {  
             Assert.IsTrue(NumberOfParamsBeforeNextMessage == 0);
             DeliverControlMessagesIfAny(); //very important since queue arrays may be changed by these messages
 
             int receiverId = _currentArray[_currentArrayPos + 0];
             int messageId = _currentArray[_currentArrayPos + 1];
             NumberOfParamsBeforeNextMessage = _currentArray[_currentArrayPos + 2];
+            int componentId = -1;
 
-            _currentArrayPos += 3;
+            if (NumberOfParamsBeforeNextMessage >= 0) //normal C# object receiver
+                _currentArrayPos += 3;                
+            else
+            {   //A negative number of parameters indicates this message is addressed to a component from a game object receiver
+                //observe control messages are an exception to this rule, we know they are control messages because receiverId == 0
+                componentId = _currentArray[_currentArrayPos + 3];
+                _currentArrayPos += 4;
+                NumberOfParamsBeforeNextMessage = - NumberOfParamsBeforeNextMessage - 1;
+            }
+
             ReadCurrentParam();
 
 
-            Message.FillUnityMessagerInternalMessageInstance( receiverId, messageId,
+            Message.FillUnityMessagerInternalMessageInstance(receiverId, componentId, messageId,
                                                               NumberOfParamsBeforeNextMessage);
         }
 

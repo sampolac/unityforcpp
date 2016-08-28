@@ -32,10 +32,10 @@ public class UnityAdapter : MonoBehaviour
         return GetSharedArray(id) as T[];
     }
 
-    //Same as GetSharedArray<>, but returning the "object" directly, with no casting
-    public object GetSharedArray(int id)
+    //Same as GetSharedArray<>, but returning the "Array" directly, with no casting
+    public Array GetSharedArray(int id)
     {
-        return _s_sharedArrays[id].GetArrayAsObject();
+        return _s_sharedArrays[id].GetArray();
     }
 
     private static UnityAdapter _s_instance = null;
@@ -180,13 +180,13 @@ public class UnityAdapter : MonoBehaviour
     //Class to hold the arrays currently allocated and shared with the C++ code
     private class SharedArrayHolder
     {
-        public SharedArrayHolder(object array)
+        public SharedArrayHolder(Array array)
         {
             _arrayAsObject = array;
             _handle = GCHandle.Alloc(array, GCHandleType.Pinned);
         }
 
-        public object GetArrayAsObject()
+        public Array GetArray()
         {
             return _arrayAsObject;
         }
@@ -201,7 +201,7 @@ public class UnityAdapter : MonoBehaviour
             _handle.Free();
         }
 
-        private object _arrayAsObject;
+        private Array _arrayAsObject;
         private GCHandle _handle;
     }; // SharedArrayHolder class
 

@@ -27,6 +27,9 @@
     <ClCompile Include="..\Source\UnityMessagerPlugin.cpp">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Test.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Source\UnityAdapter.h">
@@ -42,6 +45,9 @@
       <Filter>Source</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UnityMessager.hpp">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Test.h">
       <Filter>Source</Filter>
     </ClInclude>
   </ItemGroup>

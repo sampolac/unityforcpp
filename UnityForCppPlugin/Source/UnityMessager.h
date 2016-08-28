@@ -8,9 +8,16 @@
 #include "UnityArray.h"
 
 //Alternative access point to the UnityMessager singleton instance.
+//
 #define UNITY_MESSAGER UnityForCpp::UnityMessager::GetInstance()
 
+//Declare an Unity Game Object component, the EXACT NAME of the script file/type on C# MUST BE used. You need to declare your component 
+//before using SendMessage<componentName>(receiverId, msgId, params...). Check UM_DECLARE_COMPONENT_AS for additional details.
+//
+#define UM_DECLARE_COMPONENT(componentTypeNameOnUnity) UM_DECLARE_COMPONENT_AS(componentTypeNameOnUnity, componentTypeNameOnUnity);
+
 //Use this to DIRECTLY on the parameter list when calling SendMessage in order to pass an array parameter for an existing C array.
+//
 #define UM_ARRAY_PARAM(arrayPtr, length) UnityForCpp::UnityMessager:: \
 											ArrayParam< std::remove_const< std::remove_pointer< decltype(&(*(arrayPtr))) >:: \
 													type >::type >(&(arrayPtr)[0], length)
@@ -18,48 +25,65 @@
 //Use this to create an ArrayToFillParam instance you can use to pass as parameter on a SendMessage call and after that (AND ONLY
 //AFTER THAT) fill the array yourself item by item, without the need of creating a temporary C array. 
 //RECOMMENDED USAGE: auto myArrayToBeFilled == UM_CREATE_ARRAY_TO_FILL_PARAM(type, length);
+//
 #define UM_CREATE_ARRAY_TO_FILL_PARAM(type, length) UnityForCpp::UnityMessager::ArrayToFillParam<type>::CreateArrayToFill(length);
-
-//This sets the suport for (UM_MAX_N_OF_MESSAGE_QUEUES - 1) different parameter types. If you exceed that a C assertion will
-//be triggered so you know you need to increase this value and recompile your code. However, with that set to 32 it is almost
-//impossible to have this value not being enough for anyone's needs.
-//It corresponds to UnityMessager._maxNOfMessageQueues on C#, so once you update this value here be sure to update there too.
-#define UM_MAX_N_OF_MESSAGE_QUEUES 32
 
 namespace UnityForCpp
 {
 
+//This class allows messages to be sent from C++ to the C# side of Unity. It works together with the corresponding class on C#,
+//where you need to call UnityMessager.DeliverMessager to have these messages you sent delivered, otherwise they will be 
+//accumulated on the messages queues (which may become bigger and bigger).
+//
 class UnityMessager
 {
 public:
-	//Singleton access point. the UNITY_MESSAGER macro may be used instead for your convenience.
+	//Singleton access point. The UNITY_MESSAGER macro may be used instead for your convenience.
+	//
 	static UnityMessager& GetInstance() { ASSERT(s_pInstance); return *s_pInstance; }
 
 	//Use this method when ordering the creation of a new receiver C# object from the C++ code. You usually will be sending
-	// this id as parameter to the "create" message, for which the receiver is the factory of this new receiver C# object, 
+	//this id as parameter to the "create" message, for which the receiver is the factory of this new receiver C# object, 
 	//which should be set as receiver bound to this passed id on the C# UnityMessager instance. This way you can send
 	//messages to the newly created receiver object *IMMEDIATELY* after the create message, EVEN knowing the C# instance of this
 	//new C# receiver instance doesn't exist yet, since the create message was not delivered yet. 
+	//
 	int NewReceiverId();
 	
-	//Sends a message with no parameters to the C# object set to the specificed receiverId.
-	//The message id (msgId) value is totally under your control for you to route received messages on your C# code.
-	//YOU CAN NEVER SEND NEW MESSAGES DURING THE MESSAGE DELIVERING PROCESS STARTED BY THE C# CODE, BE AWARE OF THAT
-	//FOR THE CASE YOUR C# MESSAGE HANDLE CODE INVOKES C++ CODE, SO YOU DON'T SEND MESSAGES FROM THEM!
-	void SendMessage(int receiverId, int msgId);
-
-	//Sends a message with any number of parameters. Any type supported by UnityArray is also supported here (check  
-	//UA_SUPPORTED_TYPE comments), as well as arrays of these types passed using an instance of the struct ArrayParam or 
+	//Sends a message with any number of parameters to an specific C# object set as receiver for the receiverId (which may also be
+	//the default component set for a GameObject receiver). The message id (msgId) CANNOT be negative, except for that, it's totally   
+	//under your control for you to route received messages on your C# code. Any type supported by UnityArray is also supported here   
+	//(check UA_SUPPORTED_TYPE comments), as well as arrays of these types passed using an instance of the struct ArrayParam or 
 	//of the class ArrayToFillParam (check the comments of these). Also C strings are supported (char* or const char*), 
 	//being packed to a byte array (uint8) that can be read as string when unpacking the message on the C# code.
 	//YOU CAN NEVER SEND NEW MESSAGES DURING THE MESSAGE DELIVERING PROCESS STARTED BY THE C# CODE, BE AWARE OF THAT
-	//FOR THE CASE YOUR C# MESSAGE HANDLE CODE INVOKES C++ CODE, SO YOU DON'T SEND MESSAGES FROM THEM!
+	//FOR THE CASE YOUR C# MESSAGE HANDLE CODE INVOKES C++ CODE, SO YOU DON'T SEND MESSAGES THERE!
+	//
 	template<typename... PARAMS> void SendMessage(int receiverId, int msgId, const PARAMS&... params);
+
+	//Version of SendMessage that routes the message to the specified component of a GameObject receiver. When using this
+	//version the receiver must be a GameObject and the component must be declared on the C++ side using UM_DECLARE_COMPONENT
+	//
+	template<typename COMPONENT_TYPE, typename... PARAMS> void SendMessage(int receiverId, int msgId, const PARAMS&... params);
+
+	//Version of SendMessage for component objects based on reflection, which locates the target GameObject with "GameObject.Find"
+	//and calls the target method using reflection. The number and types of the parameters must be exactly the same of the target method.
+	//
+	template<typename COMPONENT_TYPE, typename... PARAMS> void SendMessage(const char* objectName, const char* methodName, const PARAMS&... params);
+
+	//Version of send message for component objects of GameObject receivers, which uses reflection to call the given method of a component.   
+	//The number and types of the parameters must be exactly the same of the target method. 
+	//
+	template<typename COMPONENT_TYPE, typename... PARAMS> void SendMessage(int receiverId, const char* methodName, const PARAMS&... params);
+	
+	//Version of send message for component objects, which uses "GameObject.Find" to locate a GameObject with the specified receiver component
+	//
+	template<typename COMPONENT_TYPE, typename... PARAMS> void SendMessage(const char* objectName, int msgId, const PARAMS&... params);
 
 	//Simple struct for used to push array parameters by wrapping a C array pointer together with its length in a single
 	//parameter. Uses the macro UM_ARRAY_PARAM for instancing it directly when passing the parameters to SendMessage. 
-	template <typename T>
-	struct ArrayParam
+	//
+	template <typename T> struct ArrayParam
 	{
 		const T* pArray;
 		int length;
@@ -69,12 +93,11 @@ public:
 			: pArray(arrayPtr), length(arrayLength) {}
 	};
 
-
 	//This class providers an alternative to ArrayParam, allowing you to push array parameters without the 
 	//need of creating a temporary C array for when you don't have one. Using this class you will be setting
 	//values directly on the shared array to be read when the C# code unpacks your message. 
-	template <typename T>
-	class ArrayToFillParam
+	//
+	template <typename T> class ArrayToFillParam
 	{
 	public:
 		//Creates a new ArrayToFillParam instance which MUST be passed as parameter on a SendMessage call BEFORE
@@ -105,6 +128,30 @@ public:
 		friend class UnityMessager;
 	};
 
+	//base class for declaration of GameObject components, use the macro UM_DECLARE_COMPONENT for declaring new components 
+	//this is a static class based on static polymorphism, with the unique purpose of providing an unique id per component type.
+	//derived classes from Component<DerivedClass> must implement the static method GetManagedTypeName (see below)
+	//
+	template <typename T> class Component
+	{
+	public:
+		//Returns an unique component id for the component, to be used internally by the UnityMessager 
+		static int GetId() { return s_id >= 0 ? s_id : GenerateSetAndGetComponentId(); }
+
+		//STATIC METHOD TO BE IMPLEMENTED BY THE DERIVED CLASS, must the return the exact C# component file and type name. 
+		//static const char* GetManagedTypeName(); 
+	private:
+		//Register the component by sending a register message to the C# side and by retrieving an unique component id, which
+		//is set to the s_id static variable of the class.
+		static int GenerateSetAndGetComponentId();
+		
+		//this static variable is tracked by the UnityMessager instance after being registered, so it can be reset when the game
+		//execution ends. To reset it means to set its value to -1, so at next time the component is used it is registered again
+		static int s_id;
+	};
+
+	//===================== END OF THE PUBLIC INTERFACE TO THE USER ==============================================
+
 	//This method MUST BE USED ONLY by the UnityMessagerPlugin interface implementation.
 	//it may be called on situations where the C# code wants to free not essential memory being used by the game.
 	//An usual case is when the app is paused (loses focus) on mobile devices.
@@ -132,7 +179,7 @@ public:
 	//singleton instance may be created on a new game execution via the Unity Editor.
 	static void DeleteInstance();
 
-private: //===================== END OF THE PUBLIC INTERFACE ====================================================
+private: 
 	class MessageQueueBase; //foward declarations
 	template <typename T> class MessageQueue;
 	class ControlQueue;
@@ -142,6 +189,12 @@ private: //===================== END OF THE PUBLIC INTERFACE ===================
 	//Singleton instance constructor, check InstanceAndProvideAwakeInfo comments for more details
 	UnityMessager(int maxNOfReceiverIds, int maxQueueArraysSizeInBytes);
 	~UnityMessager(); 
+
+	//Registers a new component assigning an unique id to (*componentIdStaticPtr), which MUST be the static variable
+	//of the component class, so it is tracked to be reset when the game execution ends, being prepared to a new execution 
+	void RegisterNewComponent(const char* componentTypeName, int* componentIdStaticPtr);
+
+	void PushParam() {} //just for compiling the variadic templates with no arguments
 
 	//PushParam variations for different parameter types, all of them push a single parameter to
 	//their respective ParamQueue and register this parameter existence on the control queue
@@ -172,9 +225,26 @@ private: //===================== END OF THE PUBLIC INTERFACE ===================
 	//It register a new MessageQueue being instanced by saving it on the m_messageQueuesPtrs array
 	void RegisterMessageQueue(int queueId, MessageQueueBase* msgQueue);
 
+	//This sets the suport for (UM_MAX_N_OF_MESSAGE_QUEUES - 1) different parameter types. If you exceed that a C assertion will
+	//be triggered so you know you need to increase this value and recompile your code. However, with that set to 32 it is almost
+	//impossible to have this value not being enough for anyone's needs.
+	//It corresponds to UnityMessager._maxNOfMessageQueues on C#, so once you update this value here be sure to update there too.
+#define UM_MAX_N_OF_MESSAGE_QUEUES 32
+
+	//Maximum number of components that can be declared, this should be big enough, but if more components are declared 
+	//an assertion will be triggered so you can increase this value and recompile your code.
+#define UM_MAX_N_OF_COMPONENTS 32
+
 	//this array is shared with the C# code and implements a system to allows new receiver ids to be requested
 	//by the C++ code or by the C# code, as the user logic requires, check NewReceiverId() implemention for details.
 	UnityArray<int> m_receiverIds;
+
+	//Since the game can be restarted from the Unity Editor we need to keep track of the component ids assigned, which
+	//needs to be reset to -1 when the game execution ends so a new assignement can properly happen in synch with the C# script
+	int* m_staticComponentIdsToResetPtrs[UM_MAX_N_OF_COMPONENTS];
+
+	//this is incremented for each new component being registered, returning an unique id for that component
+	int m_lastAssignedComponentId;
 
 	//array keeping all the instaced messages queues, being the control queue at the position 0 and the ParamQueue for 
 	//each different parameter type on following positions (order is determined by the usage order when pushing parameters).
@@ -287,6 +357,9 @@ private: //===================== END OF THE PUBLIC INTERFACE ===================
 		//last message sent or to start a new message sending by being re-called with another message.
 		void SendMessage(int receiverId, int msgId);
 
+		//Version of ControlQueue::SendMessage with support for a component id
+		void SendMessage(int receiverId, int componentId, int msgId);
+
 		//Sends a control message, it means a message addressed to the UnityMessager receiver instance on C#.
 		//These are special messages that can have only integer parameters and that can be sent while parameters 
 		//for the last sent message still being filled, since they are essential for advancing a queue to 
@@ -307,6 +380,9 @@ private: //===================== END OF THE PUBLIC INTERFACE ===================
 		// *HIDES* the base correspoding method to avoid an endless recursion when the control queue needs to
 		// advance itself to its next array.
 		void AdvanceToNextUnityArrayNode();
+
+		//Helper method to increment the number of parameters set on the control queue when registering a new parameter
+		void IncrementNumberOfParamsForCurrentMessage();
 
 		//points the control queue position where the number of parameters for the last sent message is 
 		//registered in order to increment it when new parameters are pushed
@@ -348,6 +424,17 @@ private: //===================== END OF THE PUBLIC INTERFACE ===================
 };
 
 }; //UnityForCpp
+
+//Declares an Unity Game Object. This is an alternative to UM_DECLARE_COMPONENT, which allows you to specify different names
+//for the cpp class representing the component and the actual name it has on C#. Preferably use UM_DECLARE_COMPONENT instead.
+//A component is a derived class of the UnityMessager::Component class (both static only, based on static polymorphism) with the
+//unique purpose of generating (statically) an unique id per component type, avoiding runtime lookup to something like a hash table. 
+#define UM_DECLARE_COMPONENT_AS(componentTypeNameOnUnity, componentTypeNameOnCpp) \
+	class componentTypeNameOnCpp : public UnityForCpp::UnityMessager::Component< componentTypeNameOnCpp > \
+	{ \
+	public: \
+		static const char* GetManagedTypeName() { return #componentTypeNameOnUnity; } \
+	}; 
 
 #include "UnityMessager.hpp"
 

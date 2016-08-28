@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 using UnityForCpp;
 
 //This class works together with the TestPlugin.cpp file in order to test the features provided by UnityForCpp
-public class UnityForCppTest : MonoBehaviour {
+public class UnityForCppTest : MonoBehaviour, UnityMessager.IMessageReceiver {
 
     //game object to have its position, scale, rotation and color manipulated from the C++ code as a test
     public GameObject testObjectPrefab;
@@ -21,19 +21,16 @@ public class UnityForCppTest : MonoBehaviour {
     //SINGLETON access point 
     public static UnityForCppTest Instance { get { return _s_instance; } }
 
+    //Just for a quick test, by calling it from cpp with SendMessage<UnityForCppTest>("UnityForCppTest", "TestReflectionBasedMessage", ...)
+    public void TestReflectionBasedMessage(int intValue, float floatValue, int[] intArray, string strValue, double doubleValue)
+    {
+        Debug.Log("[UnityForCppTest] TestReflectionBasedMessage called!");
+    }
+
     //------------ START OF THE EXPOSED C# INTERFACE -------------------------
     public void SetGameObjectRotation(int gameObjectId, float rotation)
     {
         _gameObjectTransfoms[gameObjectId].Rotate(0.0f, 0.0f, rotation);
-    }
-
-    //observe we exemplify a parameter that is not actually supported on C++, but we do support an implicit conversion to it
-    //from a supported parameter we defined (Vec2). It is just a suggestion for when cannot change a method from the public interface.
-    public void SetGameObjectScale(int gameObjectId, Vector3 scale)
-    {
-        _gameObjectTransfoms[gameObjectId].localScale = new Vector3(scale.x * _originalPrefabScale.x,
-                                                                    scale.y * _originalPrefabScale.y,
-                                                                    _originalPrefabScale.z);
     }
 
     public void SetGameObjectColor(int gameObjectId, float r, float g, float b)
@@ -58,11 +55,14 @@ public class UnityForCppTest : MonoBehaviour {
     //This method is a mere representation of C# method you would use to create instances following order from the C++ code.
     //however it is a poor example since it doesn't receive any parameter within the message itself. If your created C# object
     //were meant to be also a IMessageReceiver object, it should receive at least the receiver id issued from the C++ code as parameter.
-    private void InstanceGameObject(int gameObjectId)
+    private void InstanceGameObject(int gameObjectId, int receiverId)
     {
         var startPos = ScreenCoordsFromCppCoords(_gameObjectPositions[gameObjectId]);
         var gameObject = Instantiate(testObjectPrefab, startPos, Quaternion.identity) as GameObject;
         _gameObjectTransfoms[gameObjectId] = gameObject.GetComponent<Transform>();
+
+        if (receiverId > 0)
+            UnityMessager.Instance.SetReceiverObject(receiverId, gameObject);
     }
 
     //Test method for receiving and using an string parameter
@@ -110,7 +110,7 @@ public class UnityForCppTest : MonoBehaviour {
     //------------ END OF THE EXPOSED C# INTERFACE -------------------------
 
     //C# version of this structure supported also at the C++ side
-    private struct Vec2
+    public struct Vec2
     {
         public float x;
         public float y;
@@ -128,9 +128,6 @@ public class UnityForCppTest : MonoBehaviour {
 
     //shared array with the object positions. Coordinates vary from -1 to 1, being -1 the left, botton of the screen and 1 the right, top
     private Vec2[] _gameObjectPositions = null;
-
-    //we keep a backup of this, so when scaling we preserve this original reference value
-    private Vector3 _originalPrefabScale = new Vector3();
 
     //holder to the singleton instance reference
     private static UnityForCppTest _s_instance = null;
@@ -163,14 +160,12 @@ public class UnityForCppTest : MonoBehaviour {
         float pixelsToUnits = 1f;
         camera.orthographicSize = (Screen.height / 2.0f) / pixelsToUnits;
 
-        _originalPrefabScale = testObjectPrefab.GetComponent<Transform>().localScale;
-
         //Requests a new received id to be informed to the C++ code. This operation is suitable to be done here since this receiver
         //object is a singleton that will exist, if it was created by an order from the C++ code the receiver id should be requested there.
         int thisId = UnityMessager.Instance.NewReceiverId();
 
         //bounds the MessagerReceiver internal instance to the receiver id given above.
-        UnityMessager.Instance.SetReceiverObject(thisId, new MessageReceiver());
+        UnityMessager.Instance.SetReceiverObject(thisId, this.gameObject, this);
 
         //T_InitTest Performs the first UnityForCpp tests and initialize the test case related to this C# class 
         TestDLL.T_InitTest(thisId, numberOfGameObjects, randomUpdatesInterval);
@@ -220,81 +215,66 @@ public class UnityForCppTest : MonoBehaviour {
         return new Vector3(0.5f * Screen.width * vec2.x, 0.5f * Screen.height * vec2.y, 0.0f);
     }
 
-    //Observe we have the interface implemented into a nested class instead of the UnityForCppTest class itself,
-    //it makes sense only because UnityForCppTest manages its relation to the UnityMessager class directly, if it was
-    //a receiver instanced and controlled by other C# object it could make more sense to implement the interface 
-    //directly on the main class. Also, if this class was not a singleton we would need to wrap a reference to the
-    //respective instance the MessageReceiver correspond to. 
-    private class MessageReceiver : UnityMessager.IMessageReceiver
+    //Here we "unpack" the message routing it to the destination method by the message id value
+    public void ReceiveMessage(ref UnityMessager.Message msg)
     {
-        public void ReceiveMessage(ref UnityMessager.Message msg)
+        switch (msg.MessageId)
         {
-            switch (msg.MessageId)
-            {
-                case 0: //TRM_SET_GAME_OBJECT_ROTATION = 0,
-                    {
-                        //this is commented out because we consider there is not need to check if the number of parameters is correct
-                        //when the methods at the C++ side are wrapped by a C++ method signature, which assure paramaters are 
-                        //correct in number and types. If we were using UNITY_MESSAGER.SendMessage directly on our game logic on C++
-                        //so it could make sense to make sure at least the expected number of parameters are correct
-                        //Assert.IsTrue(msg.NumberOfParamsToBeRead == 1);
+            case 0: //TRM_SET_GAME_OBJECT_ROTATION = 0,
+                {
+                    //this is commented out because we consider there is not need to check if the number of parameters is correct
+                    //when the methods at the C++ side are wrapped by a C++ method signature, which assure paramaters are 
+                    //correct in number and types. If we were using UNITY_MESSAGER.SendMessage directly on our game logic on C++
+                    //so it could make sense to make sure at least the expected number of parameters are correct
+                    //Assert.IsTrue(msg.NumberOfParamsToBeRead == 1);
                         
-                        UnityForCppTest.Instance.
-                            SetGameObjectRotation(msg.ReadNextParamAndAdvance<int>(), //gameObjectId
-                                                  msg.ReadNextParamAndAdvance<float>()); //rotation
+                    UnityForCppTest.Instance.
+                        SetGameObjectRotation(msg.ReadNextParamAndAdvance<int>(), //gameObjectId
+                                                msg.ReadNextParamAndAdvance<float>()); //rotation
 
-                        break;
-                    }
-
-                case 1: //TRM_SET_GAME_OBJECT_SCALE = 1,
-                    {
-                        UnityForCppTest.Instance.
-                            SetGameObjectScale(msg.ReadNextParamAndAdvance<int>(), //gameObjectId
-                                               msg.ReadNextParamAndAdvance<Vec2>()); //scale
-
-                        break;
-                    }
-
-                case 2: //TRM_SET_GAME_OBJECT_COLOR = 2
-                    {
-                        int gameObjectId = msg.ReadNextParamAndAdvance<int>();
-                        if (msg.NumberOfParamsToBeRead > 1)
-                            UnityForCppTest.Instance.
-                                SetGameObjectColor(gameObjectId, //gameObjectId
-                                                msg.ReadNextParamAndAdvance<float>(), //r
-                                                msg.ReadNextParamAndAdvance<float>(), //g
-                                                msg.ReadNextParamAndAdvance<float>()); //b
-                        else
-                            UnityForCppTest.Instance.
-                                SetGameObjectColor(gameObjectId, msg.ReadNextParamAsArrayAndAdvance<float>());
-
-                        break;
-                    }
-                case 3: //TRM_SET_POSITIONS_ARRAY = 3,
-                    {
-                        UnityForCppTest.Instance.SetPositionsArray(msg.ReadNextParamAndAdvance<int>()); //arrayId
-                        break;
-                    }
-                case 4: //TRM_INSTANCE_GAME_OBJECT = 4,
-                    {
-                        UnityForCppTest.Instance.InstanceGameObject(msg.ReadNextParamAndAdvance<int>()); //gameObjectId
-                        break;
-                    }
-                case 5: //TRM_DEBUG_LOG_MESSAGE = 5
-                    {
-                        UnityForCppTest.Instance.DebugLogMessage(msg.ReadNextParamAsStringAndAdvance(),
-                                                                 msg.ReadNextParamAndAdvance<int>());                        
-                        break;
-                    }
-                case 6: //TRM_LOG_PARAM_TYPES = 6
-                    {
-                        UnityForCppTest.Instance.LogParameterTypes(msg);
-                        break;
-                    }
-                default:
-                    Debug.LogError("[UnityForCppTest] Unknow message id received by UnityForCppTest.ReceiveMessage!");
                     break;
-            }
+                }
+
+            case 1: //TRM_SET_GAME_OBJECT_COLOR = 1
+                {
+                    int gameObjectId = msg.ReadNextParamAndAdvance<int>();
+                    if (msg.NumberOfParamsToBeRead > 1)
+                        UnityForCppTest.Instance.
+                            SetGameObjectColor(gameObjectId, //gameObjectId
+                                            msg.ReadNextParamAndAdvance<float>(), //r
+                                            msg.ReadNextParamAndAdvance<float>(), //g
+                                            msg.ReadNextParamAndAdvance<float>()); //b
+                    else
+                        UnityForCppTest.Instance.
+                            SetGameObjectColor(gameObjectId, msg.ReadNextParamAsArrayAndAdvance<float>());
+
+                    break;
+                }
+            case 2: //TRM_SET_POSITIONS_ARRAY = 2,
+                {
+                    UnityForCppTest.Instance.SetPositionsArray(msg.ReadNextParamAndAdvance<int>()); //arrayId
+                    break;
+                }
+            case 3: //TRM_INSTANCE_GAME_OBJECT = 3,
+                {
+                    UnityForCppTest.Instance.InstanceGameObject(msg.ReadNextParamAndAdvance<int>(),
+                                                                msg.ReadNextParamAndAdvance<int>()); //gameObjectId
+                    break;
+                }
+            case 4: //TRM_DEBUG_LOG_MESSAGE = 4
+                {
+                    UnityForCppTest.Instance.DebugLogMessage(msg.ReadNextParamAsStringAndAdvance(),
+                                                                msg.ReadNextParamAndAdvance<int>());                        
+                    break;
+                }
+            case 5: //TRM_LOG_PARAM_TYPES = 5
+                {
+                    UnityForCppTest.Instance.LogParameterTypes(msg);
+                    break;
+                }
+            default:
+                Debug.LogError("[UnityForCppTest] Unknow message id received by UnityForCppTest.ReceiveMessage!");
+                break;
         }
     }
 
