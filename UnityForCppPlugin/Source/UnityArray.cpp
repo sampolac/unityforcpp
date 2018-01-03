@@ -28,7 +28,7 @@ namespace UnityForCpp
 		: m_id(-1), m_length(0), m_pArray(NULL)
 	{
 		m_id = UnityAdapter::NewManagedArray(unityArray.GetManagedTypeName(), unityArray.GetLength(), &m_pArray);
-		m_length = m_length;
+		m_length = unityArray.GetLength();
 
 		memcpy(m_pArray, unityArray.GetVoidPtr(), unityArray.GetLength()*unityArray.GetTypeSize());
 	}

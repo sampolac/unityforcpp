@@ -1,4 +1,4 @@
-﻿//Copyright (c) 2016, Samuel Pollachini (Samuel Polacchini)
+//Copyright (c) 2016, Samuel Pollachini (Samuel Polacchini)
 //The UnityForCpp project is licensed under the terms of the MIT license
 
 using UnityEngine;
@@ -280,6 +280,8 @@ public class UnityForCppTest : MonoBehaviour, UnityMessager.IMessageReceiver {
 
 #if (UNITY_WEBGL || UNITY_IOS) && !(UNITY_EDITOR)
     const string DLL_NAME = "__Internal";
+#elif UNITY_ANDROID && !UNITY_EDITOR
+    const string DLL_NAME = "unityforcpp";
 #else
     const string DLL_NAME = "UnityForCpp";
 #endif

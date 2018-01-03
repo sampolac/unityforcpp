@@ -26,8 +26,8 @@ typedef int16_t int16; //short
 typedef uint16_t uint16; //unsigned short
 typedef int32_t int32; //int
 typedef uint32_t uint32; //unsigned int
-typedef int64_t int64; //long long
-typedef uint64_t uint64; //unsigned long long
+typedef long long int64; //long long
+typedef unsigned long long uint64; //unsigned long long
 
 
 #include "stdio.h"
